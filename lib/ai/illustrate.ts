@@ -86,7 +86,7 @@ export async function generateIllustration(
         const prompt = parts.join('\n\n')
 
         // Gemini 3 Pro (Nano Banana Pro) REST call
-        const apiKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_GEMINI_API_KEY
+        const apiKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY
         if (!apiKey) throw new Error('Missing GOOGLE_API_KEY for Gemini Image Generation')
 
         // Using v1beta as the predicting endpoint for gemini image models
