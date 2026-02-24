@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { generateIllustration } from '@/lib/ai/illustrate'
+import { generateIllustration, generateCharacterBible } from '@/lib/ai/illustrate'
 import { generateStoryPDF } from '@/lib/pdf/generate'
 import { sendIllustratedBookReadyEmail } from '@/lib/resend'
+
+export const maxDuration = 300
 
 export async function POST(request: NextRequest) {
     const { bookId, paymentIntentId, authorString } = await request.json()
@@ -26,14 +28,14 @@ export async function POST(request: NextRequest) {
             .eq('book_id', bookId)
             .order('chapter_number')
 
-        // Get admin config for image style
-        const { data: config } = await supabase.from('admin_config').select('image_style').single()
+        // Get admin config for image style and model
+        const { data: config } = await supabase.from('admin_config').select('image_style, image_model').single()
         const imageStyle = config?.image_style || 'watercolor illustration, children\'s book style'
+        const imageModel = config?.image_model || 'dall-e-3'
 
-        // Get best available text for each chapter
-        const chapterData = []
+        // Pre-fetch all best available text to generate the character bible
+        const chaptersWithText = []
         for (const ch of chapters || []) {
-            // Check for rewrites first
             const { data: rewrite } = await supabase
                 .from('rewrites')
                 .select('content')
@@ -44,20 +46,78 @@ export async function POST(request: NextRequest) {
                 .single()
 
             const content = rewrite?.content || ch.transcript_cleaned || ch.transcript_original || ''
+            chaptersWithText.push({ chapterNumber: ch.chapter_number, content, originalChapter: ch })
+        }
 
-            // Generate illustration
+        // Generate Character Bible
+        let characterBible = ''
+        try {
+            console.log('Generating Character Bible for book', bookId)
+            characterBible = await generateCharacterBible(chaptersWithText.map(c => ({
+                chapterNumber: c.chapterNumber,
+                content: c.content
+            })))
+            console.log('Character Bible generated:\n', characterBible)
+        } catch (e) {
+            console.error('Failed to generate character bible:', e)
+            // graceful degradation: just proceed without it
+        }
+
+        // --------------------------------------------------------------------
+        // Paginate Chapters
+        // --------------------------------------------------------------------
+        const { paginateChapter } = await import('@/lib/ai/pagination')
+        const allPages: { chapterNumber: number; content: string; illustrationPrompt: string }[] = []
+
+        for (const c of chaptersWithText) {
+            try {
+                console.log(`Paginating chapter ${c.chapterNumber}...`)
+                const { pages } = await paginateChapter(c.content, c.chapterNumber)
+                for (const p of pages) {
+                    allPages.push({
+                        chapterNumber: c.chapterNumber,
+                        content: p.content,
+                        illustrationPrompt: p.illustrationPrompt,
+                    })
+                }
+            } catch (e) {
+                console.error(`Pagination failed for chapter ${c.chapterNumber}, falling back to single page.`, e)
+                allPages.push({
+                    chapterNumber: c.chapterNumber,
+                    content: c.content,
+                    illustrationPrompt: c.content.substring(0, 300)
+                })
+            }
+        }
+
+        // --------------------------------------------------------------------
+        // Generate illustrations for each PAGE sequentially
+        // --------------------------------------------------------------------
+        const pageData = []
+        let pageIndex = 1
+        for (const page of allPages) {
+            const { content, chapterNumber, illustrationPrompt } = page
+
             let illustrationBuffer: Buffer | undefined
             try {
-                illustrationBuffer = await generateIllustration(content, imageStyle, ch.chapter_number)
+                console.log(`Generating illustration for page ${pageIndex} (Chapter ${chapterNumber})...`)
+                illustrationBuffer = await generateIllustration(
+                    illustrationPrompt,
+                    imageStyle,
+                    chapterNumber,
+                    imageModel,
+                    characterBible
+                )
             } catch (e) {
-                console.error(`Illustration generation failed for chapter ${ch.chapter_number}:`, e)
+                console.error(`Illustration generation failed for page ${pageIndex}:`, e)
             }
 
-            chapterData.push({
-                chapterNumber: ch.chapter_number,
+            pageData.push({
+                chapterNumber,
                 content,
                 illustrationBuffer,
             })
+            pageIndex++
         }
 
         // Get author name
@@ -65,7 +125,7 @@ export async function POST(request: NextRequest) {
         const authorName = authorString || authUser?.user?.user_metadata?.display_name || authUser?.user?.email || 'Anonymous'
 
         // Generate PDF
-        const pdfBuffer = await generateStoryPDF(book.title, chapterData, authorName)
+        const pdfBuffer = await generateStoryPDF(book.title, pageData, authorName)
 
         // Upload PDF
         const pdfPath = `${bookId}/${Date.now()}-illustrated.pdf`

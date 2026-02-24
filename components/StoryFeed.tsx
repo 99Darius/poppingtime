@@ -2,7 +2,7 @@
 
 import { Chapter } from '@/lib/types'
 import ChapterCard from './ChapterCard'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface StoryFeedProps {
     chapters: Chapter[]
@@ -65,24 +65,104 @@ export default function StoryFeed({ chapters, bookId, bookStatus, bookTitle }: S
                         justifyContent: 'center',
                         background: 'linear-gradient(135deg, #f59e0b, #f97316)',
                     }}>
-                        🎨 Create Illustrated Book — $9.90
+                        🎨 Create Illustrated Book
                     </a>
                 )}
             </div>
+
+            {/* Floating Action Button for Mobile */}
+            {bookStatus === 'ended' && (
+                <a href={`/books/${bookId}/illustrate`} className="btn-primary slide-up" style={{
+                    position: 'fixed',
+                    bottom: 24,
+                    right: 24,
+                    zIndex: 50,
+                    boxShadow: '0 8px 32px rgba(249, 115, 22, 0.4)',
+                    background: 'linear-gradient(135deg, #f59e0b, #f97316)',
+                    borderRadius: 999,
+                    padding: '16px 24px',
+                }}>
+                    🎨 Create Illustrated Book
+                </a>
+            )}
         </div>
     )
 }
 
 function EndBookButton({ bookId }: { bookId: string }) {
+    const [showModal, setShowModal] = useState(false)
+    const [isLoading, setIsLoading] = useState(false)
+
     async function handleEnd() {
-        if (!confirm('End this book? You can still create an illustrated version, but no more chapters can be added.')) return
-        await fetch(`/api/books/${bookId}/end`, { method: 'POST' })
-        window.location.reload()
+        setIsLoading(true)
+        try {
+            await fetch(`/api/books/${bookId}/end`, { method: 'POST' })
+            window.location.reload()
+        } catch {
+            setIsLoading(false)
+            setShowModal(false)
+        }
     }
 
     return (
-        <button onClick={handleEnd} className="btn-secondary" style={{ minWidth: 140 }}>
-            📕 End Book
-        </button>
+        <>
+            <button
+                onClick={() => setShowModal(true)}
+                className="btn-secondary"
+                style={{ minWidth: 140 }}
+            >
+                📕 End Book
+            </button>
+
+            {showModal && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0,0,0,0.5)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 1000,
+                    padding: 20
+                }}>
+                    <div className="card slide-up" style={{
+                        padding: 32,
+                        maxWidth: 400,
+                        width: '100%',
+                        textAlign: 'center'
+                    }}>
+                        <div style={{ fontSize: 48, marginBottom: 16 }}>📕</div>
+                        <h3 className="serif" style={{ fontSize: 24, color: 'var(--purple-deep)', marginBottom: 12 }}>
+                            End this book?
+                        </h3>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: 15, lineHeight: 1.5, marginBottom: 24 }}>
+                            You can still create an illustrated version, but no more recording chapters can be added.
+                        </p>
+
+                        <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+                            <button
+                                className="btn-ghost"
+                                onClick={() => setShowModal(false)}
+                                disabled={isLoading}
+                                style={{ flex: 1, padding: '12px' }}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                className="btn-primary"
+                                onClick={handleEnd}
+                                disabled={isLoading}
+                                style={{ flex: 1, padding: '12px', justifyContent: 'center', background: '#ef4444' }}
+                            >
+                                {isLoading ? <span className="spinner" /> : 'End Book'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
     )
 }

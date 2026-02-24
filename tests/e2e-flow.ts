@@ -148,7 +148,7 @@ async function runTests() {
     console.log('\n📖 1. PLOT GENERATION (GPT-5.2)')
     await test('Generate funny plot', async () => {
         const { generatePlot } = await import('../lib/ai/plot')
-        const plot = await generatePlot('funny', 'gpt-5.2', 5, 0.9)
+        const { plot } = await generatePlot('funny', 'gpt-5.2', 5, 0.9, '')
         assert(!!plot.hook, 'Plot should have a hook')
         assert(!!plot.problem, 'Plot should have a problem')
         assert(Array.isArray(plot.action), 'Action should be an array')
@@ -161,7 +161,7 @@ async function runTests() {
 
     await test('Generate adventurous plot', async () => {
         const { generatePlot } = await import('../lib/ai/plot')
-        const plot = await generatePlot('adventurous', 'gpt-5.2', 3, 0.8)
+        const { plot } = await generatePlot('adventurous', 'gpt-5.2', 3, 0.8, '')
         assert(!!plot.hook, 'Plot should have a hook')
         assert(plot.action.length <= 5, 'Should respect maxBullets')
         console.log(`     Hook: ${plot.hook.substring(0, 80)}...`)
@@ -305,7 +305,7 @@ async function runTests() {
     await test('Clean up transcript', async () => {
         const { cleanupTranscript } = await import('../lib/ai/cleanup')
         const raw = 'um so like once upon a time right there was this um dragon named blaze and he like really really loved doing his homework you know'
-        const cleaned = await cleanupTranscript(raw)
+        const { text: cleaned } = await cleanupTranscript(raw)
 
         assert(cleaned.length > 0, 'Cleaned transcript should not be empty')
         assert(cleaned !== raw, 'Cleaned transcript should differ from raw')
@@ -323,7 +323,7 @@ async function runTests() {
     await test('Rewrite a single chapter', async () => {
         const { rewriteChapter } = await import('../lib/ai/rewrite')
         const transcript = 'Once upon a time, there was a dragon named Blaze who absolutely loved doing homework. Every day he would fly to school with his backpack full of textbooks.'
-        const rewritten = await rewriteChapter(transcript, 'gpt-5.2')
+        const { text: rewritten } = await rewriteChapter(transcript, 'gpt-5.2', '')
 
         assert(rewritten.length > 0, 'Rewrite should not be empty')
         assert(rewritten.length > transcript.length * 0.5, 'Rewrite should be substantial')
@@ -347,7 +347,7 @@ async function runTests() {
             { chapterNumber: 1, transcript: 'Once upon a time, there was a dragon named Blaze who loved homework.' },
             { chapterNumber: 2, transcript: 'Blaze flew over the mountains with his friend Fern the fairy. They were looking for the Library of Infinite Stories.' },
         ]
-        const rewritten = await rewriteBook(chapters, 'gpt-5.2')
+        const { text: rewritten } = await rewriteBook(chapters, 'gpt-5.2')
 
         assert(rewritten.length > 0, 'Book rewrite should not be empty')
         assert(rewritten.includes('Chapter') || rewritten.includes('chapter'), 'Should have chapter markers')
@@ -365,7 +365,7 @@ async function runTests() {
         const text = 'A friendly dragon named Blaze flew through a sunset sky, carrying a stack of colorful books in his arms, with a tiny fairy riding on his shoulder.'
         const style = 'watercolor illustration, children\'s book style'
 
-        const buffer = await generateIllustration(text, style, 1)
+        const buffer = await generateIllustration(text, style, 1, 'dall-e-3')
         assert(Buffer.isBuffer(buffer), 'Should return a Buffer')
         assert(buffer.length > 1000, `Image should be substantial (got ${buffer.length} bytes)`)
         console.log(`     Generated illustration: ${buffer.length} bytes`)

@@ -1,8 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 
-export default function LoginPage() {
+function LoginContent() {
+    const searchParams = useSearchParams()
+    const next = searchParams.get('next')
     const [email, setEmail] = useState('')
     const [sent, setSent] = useState(false)
     const [loading, setLoading] = useState(false)
@@ -19,7 +22,7 @@ export default function LoginPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     email,
-                    redirectTo: `${window.location.origin}/auth/callback`,
+                    redirectTo: `${window.location.origin}/auth/callback${next ? `?next=${encodeURIComponent(next)}` : ''}`,
                 }),
             })
 
@@ -174,5 +177,13 @@ export default function LoginPage() {
                 </p>
             </div>
         </div>
+    )
+}
+
+export default function LoginPage() {
+    return (
+        <Suspense fallback={<div>Loading...</div>}>
+            <LoginContent />
+        </Suspense>
     )
 }

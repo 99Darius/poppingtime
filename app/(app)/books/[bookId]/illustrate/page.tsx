@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 
@@ -11,9 +12,10 @@ export default function IllustratePage() {
     const params = useParams()
     const bookId = params.bookId as string
     const [clientSecret, setClientSecret] = useState<string | null>(null)
-    const [status, setStatus] = useState<'idle' | 'loading' | 'paying' | 'generating' | 'complete' | 'error'>('idle')
-    const [downloadUrl, setDownloadUrl] = useState<string>('')
+    const [status, setStatus] = useState<'idle' | 'loading' | 'paying' | 'error'>('idle')
+    const [showToast, setShowToast] = useState(false)
     const [authorString, setAuthorString] = useState('')
+    const [pdfCredits, setPdfCredits] = useState(0)
 
     useEffect(() => {
         async function fetchDefaultAuthor() {
@@ -34,10 +36,31 @@ export default function IllustratePage() {
                 }
 
                 setAuthorString(defaultStr)
+                const { data: profile } = await supabase.from('user_profiles').select('free_pdf_credits').eq('id', user.id).single()
+                if (profile) setPdfCredits(profile.free_pdf_credits || 0)
             }
         }
         fetchDefaultAuthor()
     }, [bookId])
+
+    async function handleRedeemCredit() {
+        setStatus('loading')
+        try {
+            const res = await fetch('/api/illustrate/redeem', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bookId, authorString }),
+            })
+            if (res.ok) {
+                setShowToast(true)
+                setStatus('idle')
+            } else {
+                setStatus('error')
+            }
+        } catch {
+            setStatus('error')
+        }
+    }
 
     async function initPayment() {
         setStatus('loading')
@@ -59,39 +82,7 @@ export default function IllustratePage() {
         }
     }
 
-    if (status === 'complete') {
-        return (
-            <div className="slide-up" style={{ textAlign: 'center', padding: '60px 20px' }}>
-                <div style={{ fontSize: 64, marginBottom: 20 }}>🎉</div>
-                <h2 className="serif" style={{ fontSize: 24, color: 'var(--purple-deep)', marginBottom: 10 }}>
-                    Your illustrated book is ready!
-                </h2>
-                <p style={{ color: 'var(--text-secondary)', marginBottom: 24 }}>
-                    A download link has also been sent to your email.
-                </p>
-                {downloadUrl && (
-                    <a href={downloadUrl} target="_blank" className="btn-primary" style={{ fontSize: 16 }}>
-                        📥 Download PDF
-                    </a>
-                )}
-            </div>
-        )
-    }
 
-    if (status === 'generating') {
-        return (
-            <div style={{ textAlign: 'center', padding: '80px 20px' }}>
-                <div className="spinner" style={{ width: 48, height: 48, margin: '0 auto 24px', borderWidth: 4 }} />
-                <h2 className="serif" style={{ fontSize: 22, color: 'var(--purple-deep)', marginBottom: 8 }}>
-                    Creating your illustrated book...
-                </h2>
-                <p style={{ color: 'var(--text-muted)', fontSize: 14, lineHeight: 1.6 }}>
-                    Our AI is generating unique illustrations for each chapter.<br />
-                    This may take a few minutes. Don&apos;t close this page.
-                </p>
-            </div>
-        )
-    }
 
     return (
         <div className="fade-in" style={{ maxWidth: 440, margin: '0 auto', padding: '40px 0' }}>
@@ -144,55 +135,107 @@ export default function IllustratePage() {
                         onChange={(e) => setAuthorString(e.target.value)}
                         placeholder="e.g. Daddy, Mommy & Timmy"
                     />
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                        This will be stamped on the cover and the final page of your book.
-                    </p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 4 }}>
+                        <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                            This will be stamped on the cover and the final page of your book.
+                        </p>
+                        <Link href="/settings" style={{ fontSize: 12, color: 'var(--purple-deep)', fontWeight: 500, textDecoration: 'none' }}>
+                            Edit Co-Authors →
+                        </Link>
+                    </div>
                 </div>
             )}
 
-            {clientSecret && status === 'paying' ? (
+            {status === 'idle' || status === 'loading' || status === 'error' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    {pdfCredits > 0 && (
+                        <div style={{ textAlign: 'center', background: 'rgba(16, 185, 129, 0.05)', padding: 16, borderRadius: 12, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                            <p style={{ color: '#10b981', fontWeight: 600, marginBottom: 12, fontSize: 14 }}>
+                                🎁 You have {pdfCredits} Free PDF Credit{pdfCredits > 1 ? 's' : ''}!
+                            </p>
+                            <button
+                                onClick={handleRedeemCredit}
+                                disabled={status === 'loading'}
+                                className="btn-primary"
+                                style={{
+                                    width: '100%',
+                                    justifyContent: 'center',
+                                    fontSize: 15,
+                                    padding: '14px',
+                                    background: '#10b981',
+                                }}
+                            >
+                                {status === 'loading' ? <><span className="spinner" /> Processing...</> : '🎨 Redeem 1 Credit'}
+                            </button>
+                        </div>
+                    )}
+
+                    <button
+                        onClick={initPayment}
+                        disabled={status === 'loading'}
+                        className="btn-primary"
+                        style={{
+                            width: '100%',
+                            justifyContent: 'center',
+                            fontSize: 15,
+                            padding: '14px',
+                            background: 'linear-gradient(135deg, #f59e0b, #f97316)',
+                        }}
+                    >
+                        {status === 'loading' ? (
+                            <><span className="spinner" /> Preparing...</>
+                        ) : status === 'error' ? (
+                            'Try Again'
+                        ) : (
+                            '💳 Buy Credit ($9.90)'
+                        )}
+                    </button>
+                </div>
+            ) : clientSecret && status === 'paying' ? (
                 <Elements stripe={stripePromise} options={{ clientSecret }}>
                     <CheckoutForm
                         onSuccess={(url) => {
-                            setStatus('generating')
-                            // Poll for completion
-                            const poll = setInterval(async () => {
-                                try {
-                                    const res = await fetch(`/api/books/${bookId}`)
-                                    const book = await res.json()
-                                    // Check illustrated_books status — simplified polling
-                                } catch { }
-                            }, 5000)
-                            // Set a timeout for the generating state
-                            setTimeout(() => {
-                                setDownloadUrl(url || '')
-                                setStatus('complete')
-                                clearInterval(poll)
-                            }, 60000)
+                            setShowToast(true)
+                            setStatus('idle')
+                            setClientSecret(null)
                         }}
                     />
                 </Elements>
-            ) : (
-                <button
-                    onClick={initPayment}
-                    disabled={status === 'loading'}
-                    className="btn-primary"
-                    style={{
-                        width: '100%',
-                        justifyContent: 'center',
-                        fontSize: 16,
-                        padding: '16px',
-                        background: 'linear-gradient(135deg, #f59e0b, #f97316)',
-                    }}
-                >
-                    {status === 'loading' ? (
-                        <><span className="spinner" /> Preparing...</>
-                    ) : status === 'error' ? (
-                        'Try Again'
-                    ) : (
-                        '🎨 Purchase Illustrated Book — $9.90'
-                    )}
-                </button>
+            ) : null}
+
+            {showToast && (
+                <div className="slide-up" style={{
+                    position: 'fixed',
+                    bottom: 24,
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    background: 'var(--purple-deep)',
+                    color: 'white',
+                    padding: '16px 20px',
+                    borderRadius: 12,
+                    boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+                    zIndex: 1000,
+                    width: '90%',
+                    maxWidth: 400,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 12
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                        <div>
+                            <h4 style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Processing Book 🎨</h4>
+                            <p style={{ fontSize: 13, lineHeight: 1.5, opacity: 0.9 }}>
+                                This might take a few minutes. We will email you and it will appear in your completed books section when it is ready.
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => setShowToast(false)}
+                            style={{ background: 'none', border: 'none', color: 'white', opacity: 0.6, cursor: 'pointer', fontSize: 20 }}
+                        >
+                            ×
+                        </button>
+                    </div>
+                </div>
             )}
         </div>
     )

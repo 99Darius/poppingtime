@@ -13,12 +13,45 @@ export async function POST(request: NextRequest) {
         const serviceClient = await createServiceClient()
         const { data: config } = await serviceClient.from('admin_config').select('*').single()
 
-        const plot = await generatePlot(
+        const defaultPlotPrompt = `Generate a {{toneDescription}} children's bedtime story outline for ages 8-12. Be creative, playful, and imaginative. Keep it child-appropriate. Use easy-to-understand words.
+CRITICAL RULES:
+1. Every single aspect (hook, problem, action, climax, resolution) MUST be strictly LESS THAN 10 WORDS. Get straight to the key points and core actions. Do NOT use descriptive filler.
+2. Ensure the ideas are strictly kid-friendly and concrete. Do NOT use complex adult metaphors (like paying rent, taxes, or repossessing things).
+3. If introducing weird, magical, or wacky concepts, limit them to a MAXIMUM of 1 or 2 total weird ideas so the story remains easy to follow. Make sure those ideas are easily understandable.
+4. The requested Characters MUST be directly linked to and suitable for the plot you generated. They must make sense in this world.
+
+Return a valid JSON object with EXACTLY this structure:
+{
+  "title": "A fun, catchy title for the story",
+  "hook": "Intriguing premise (max 10 words)",
+  "problem": "Main conflict (max 10 words)",
+  "action": ["obstacle 1 (max 10 words)", "obstacle 2 (max 10 words)", "obstacle 3 (max 10 words)"] (up to {{maxBullets}} bullets),
+  "climax": "Biggest challenge (max 10 words)",
+  "resolution": "How it all ends (1 sentence)",
+  "characters": {
+    "protagonist": "Name — one-line fun description matching the plot",
+    "companion": "Name — one-line fun description matching the plot",
+    "mentor": "Name — one-line fun description matching the plot",
+    "antagonist": "Name — one-line fun description matching the plot"
+  }
+}`
+
+        const { plot, usage } = await generatePlot(
             (tone || config?.plot_tone || 'funny') as PlotTone,
-            config?.plot_model || 'gpt-5.2',
+            config?.plot_model || 'gpt-4o',
             config?.plot_max_bullets || 5,
-            config?.creativity_level || 0.9
+            config?.creativity_level || 0.9,
+            config?.plot_prompt || defaultPlotPrompt
         )
+
+        if (usage) {
+            await serviceClient.from('system_logs').insert({
+                user_id: user.id,
+                event_type: 'plot_generated',
+                message: 'Generated story plot',
+                metadata: { usage, model: config?.plot_model || 'gpt-4o' }
+            })
+        }
 
         return NextResponse.json(plot)
     } catch (err) {

@@ -32,7 +32,7 @@ export async function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl
 
     // Public routes (root is now public landing)
-    const publicRoutes = ['/login', '/auth/callback', '/gift', '/about', '/terms', '/privacy', '/api/welcome', '/api/auth', '/api/stripe/webhook']
+    const publicRoutes = ['/login', '/auth/callback', '/gift', '/about', '/terms', '/privacy', '/api/welcome', '/api/auth', '/api/stripe/webhook', '/api/illustrate/generate']
     const isPublic = publicRoutes.some((r) => pathname.startsWith(r)) || pathname === '/'
 
     if (!user && !isPublic) {

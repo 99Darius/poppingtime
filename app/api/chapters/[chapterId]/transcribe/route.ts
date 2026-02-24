@@ -37,7 +37,8 @@ export async function POST(_: NextRequest, { params }: Props) {
         // Cleanup with Claude Haiku
         let cleanedTranscript = rawTranscript
         try {
-            cleanedTranscript = await cleanupTranscript(rawTranscript)
+            const { text } = await cleanupTranscript(rawTranscript)
+            cleanedTranscript = text
         } catch (e) {
             console.error('Cleanup failed, using raw transcript:', e)
         }

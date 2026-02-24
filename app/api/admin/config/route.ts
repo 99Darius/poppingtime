@@ -13,9 +13,36 @@ export async function PATCH(request: NextRequest) {
 
     const { error } = await supabase
         .from('admin_config')
-        .update({ ...body, updated_at: new Date().toISOString() })
+        .update({
+            rewrite_model: body.rewrite_model,
+            plot_model: body.plot_model,
+            image_model: body.image_model,
+            image_style: body.image_style,
+            plot_tone: body.plot_tone,
+            plot_max_bullets: body.plot_max_bullets,
+            creativity_level: body.creativity_level,
+            rewrite_prompt: body.rewrite_prompt,
+            plot_prompt: body.plot_prompt,
+            updated_at: new Date().toISOString()
+        })
         .eq('id', 1)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    // Insert history snapshot
+    await supabase.from('admin_config_history').insert({
+        config_snapshot: {
+            rewrite_model: body.rewrite_model,
+            plot_model: body.plot_model,
+            image_model: body.image_model,
+            image_style: body.image_style,
+            plot_tone: body.plot_tone,
+            plot_max_bullets: body.plot_max_bullets,
+            creativity_level: body.creativity_level,
+            rewrite_prompt: body.rewrite_prompt,
+            plot_prompt: body.plot_prompt,
+        }
+    })
+
     return NextResponse.json({ success: true })
 }

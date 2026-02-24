@@ -11,12 +11,70 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         redirect('/login')
     }
 
-    // Fetch books for sidebar
-    const { data: books } = await supabase
+    // Fetch books user owns
+    const { data: ownedBooks } = await supabase
         .from('books')
-        .select('id, title, owner_id, updated_at, book_contributors!inner(user_id)')
+        .select(`
+            id, 
+            title, 
+            owner_id, 
+            status,
+            updated_at,
+            book_contributors(user_id),
+            illustrated_books(id, status, download_url)
+        `)
+        .eq('owner_id', user.id)
+
+    // Fetch books user is a contributor to
+    const { data: contributedBooks } = await supabase
+        .from('books')
+        .select(`
+            id, 
+            title, 
+            owner_id, 
+            status,
+            updated_at,
+            book_contributors!inner(user_id),
+            illustrated_books(id, status, download_url)
+        `)
         .eq('book_contributors.user_id', user.id)
-        .order('updated_at', { ascending: false })
+
+    // Merge and deduplicate
+    const allBooks = [...(ownedBooks || []), ...(contributedBooks || [])]
+    const booksMap = new Map()
+    allBooks.forEach(b => {
+        if (!booksMap.has(b.id)) {
+            booksMap.set(b.id, b)
+        }
+    })
+
+    // Sort descending by updated_at
+    const books = Array.from(booksMap.values()).sort((a, b) => {
+        return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+    })
+
+    const currentBooks = books.filter(b => {
+        const hasCompletedPdf = b.illustrated_books?.some((ib: any) => ib.status === 'complete')
+        return b.status !== 'ended' && !hasCompletedPdf
+    })
+
+    const completedBooks = books.filter(b => {
+        return b.status === 'ended' || b.illustrated_books?.some((ib: any) => ib.status === 'complete')
+    })
+
+    // Fetch active book's co-authors to display on the top right
+    let activeCoAuthors: any[] = []
+    if (books && books.length > 0) {
+        const { data: contribs } = await supabase
+            .from('book_contributors')
+            .select('user_profiles(display_name)')
+            .eq('book_id', books[0].id)
+            .neq('user_id', user.id) // Exclude self
+
+        if (contribs) activeCoAuthors = contribs
+    }
+
+    const displayName = user.user_metadata?.display_name || user.email?.split('@')[0]
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--cream)' }}>
@@ -35,12 +93,28 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     </Link>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 13, color: 'var(--purple-deep)', fontWeight: 500, marginRight: 8, display: 'none' }}>{user.email}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+
+                    {/* Active Co-Authors Display */}
+                    {activeCoAuthors.length > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginRight: 8 }}>
+                            <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Co-authors:</span>
+                            {activeCoAuthors.map((c, i) => (
+                                <span key={i} style={{ fontSize: 13, fontWeight: 500, color: 'var(--purple-deep)', background: 'var(--purple-pale)', padding: '4px 10px', borderRadius: 12 }}>
+                                    {c.user_profiles?.display_name || 'Anonymous'}
+                                </span>
+                            ))}
+                        </div>
+                    )}
 
                     {books && books.length > 0 && (
                         <CoAuthorInvite bookId={books[0].id} isOwner={books[0].owner_id === user.id} />
                     )}
+
+                    {/* My Name */}
+                    <span style={{ fontSize: 14, color: 'var(--purple-deep)', fontWeight: 600, borderLeft: '1px solid var(--border)', paddingLeft: 12 }}>
+                        {displayName}
+                    </span>
 
                     <Link href="/settings" className="btn-ghost" style={{ fontSize: 13, padding: '6px 12px' }}>⚙️ Settings</Link>
                     <form action="/api/auth/signout" method="POST" style={{ margin: 0 }}>
@@ -74,11 +148,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                             textTransform: 'uppercase', letterSpacing: '1px', padding: '8px 8px 4px',
                             marginBottom: 8
                         }}>
-                            Your Library
+                            Current Books
                         </p>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            {books?.map((book: any) => (
+                            {currentBooks.map((book: any) => (
                                 <Link key={book.id} href={`/books/${book.id}`} style={{
                                     textDecoration: 'none',
                                     color: 'var(--purple-deep)',
@@ -91,12 +165,70 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                                     overflow: 'hidden',
                                     textOverflow: 'ellipsis'
                                 }} className="sidebar-link">
-                                    📚 {book.title || 'Untitled Story'}
+                                    📖 {book.title || 'Untitled Story'}
                                 </Link>
                             ))}
-                            {books?.length === 0 && (
-                                <p style={{ fontSize: 13, color: 'var(--text-muted)', padding: '0 8px' }}>No stories yet.</p>
+                            {currentBooks.length === 0 && (
+                                <p style={{ fontSize: 13, color: 'var(--text-muted)', padding: '0 8px' }}>No active stories.</p>
                             )}
+                        </div>
+
+                        <div style={{ marginTop: 24 }}>
+                            <p style={{
+                                fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
+                                textTransform: 'uppercase', letterSpacing: '1px', padding: '8px 8px 4px',
+                                marginBottom: 4
+                            }}>
+                                Completed Books
+                            </p>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                {completedBooks.map((book: any) => {
+                                    const completedIbs = book.illustrated_books?.filter((ib: any) => ib.status === 'complete' && ib.download_url) || []
+                                    return (
+                                        <div key={book.id}>
+                                            <Link href={`/books/${book.id}`} style={{
+                                                textDecoration: 'none',
+                                                color: 'var(--text-secondary)',
+                                                fontSize: 14,
+                                                padding: '8px 12px',
+                                                borderRadius: 'var(--radius)',
+                                                transition: 'background 0.2s',
+                                                fontWeight: 500,
+                                                whiteSpace: 'nowrap',
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                                display: 'block'
+                                            }} className="sidebar-link">
+                                                🏆 {book.title || 'Untitled Story'}
+                                            </Link>
+                                            {completedIbs.map((ib: any, index: number) => (
+                                                <a key={ib.id} href={ib.download_url} target="_blank" rel="noopener noreferrer" style={{
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: 4,
+                                                    fontSize: 11,
+                                                    color: 'white',
+                                                    background: 'linear-gradient(135deg, #f59e0b, #f97316)',
+                                                    padding: '3px 10px',
+                                                    borderRadius: 12,
+                                                    marginLeft: 12,
+                                                    marginTop: 2,
+                                                    marginBottom: index === completedIbs.length - 1 ? 4 : 2,
+                                                    textDecoration: 'none',
+                                                    fontWeight: 600,
+                                                    transition: 'opacity 0.2s'
+                                                }}>
+                                                    📱 View PDF {completedIbs.length > 1 ? `v${completedIbs.length - index}` : ''}
+                                                </a>
+                                            ))}
+                                        </div>
+                                    )
+                                })}
+                                {completedBooks.length === 0 && (
+                                    <p style={{ fontSize: 13, color: 'var(--text-muted)', padding: '0 8px' }}>No completed books yet.</p>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </aside>

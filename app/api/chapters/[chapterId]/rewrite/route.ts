@@ -17,7 +17,8 @@ export async function POST(request: NextRequest, { params }: Props) {
 
     // Get admin config for model
     const { data: config } = await serviceClient.from('admin_config').select('*').single()
-    const model = config?.rewrite_model || 'claude-opus-4-5'
+    const model = config?.rewrite_model || 'claude-3-opus-20240229'
+    const rewritePrompt = config?.rewrite_prompt || 'You are an editor. Your ONLY job is to clean up a voice-recorded transcript. Fix obvious speech recognition errors, spelling, and grammar. Do NOT change the sentence structure, length, meaning, creativity, or voice. Let the user keep the exact essence of what they recorded.'
 
     if (scope === 'book') {
         const { data: chapter } = await supabase.from('chapters').select('book_id').eq('id', chapterId).single()
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     if (!chapter) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     const transcript = chapter.transcript_cleaned || chapter.transcript_original || ''
-    const content = await rewriteChapter(transcript, model)
+    const content = await rewriteChapter(transcript, model, rewritePrompt)
 
     const { data: rewrite } = await supabase
         .from('rewrites')

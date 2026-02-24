@@ -123,7 +123,8 @@ async function transcribeChapterAsync(chapterId: string, audioPath: string, serv
         // Cleanup with GPT
         let cleanedTranscript = rawTranscript
         try {
-            cleanedTranscript = await cleanupTranscript(rawTranscript)
+            const { text } = await cleanupTranscript(rawTranscript)
+            cleanedTranscript = text
         } catch (e) {
             console.error('[transcribe] Cleanup failed, using raw transcript:', e)
         }

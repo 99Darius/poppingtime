@@ -12,6 +12,7 @@ export default function CoAuthorInvite({ bookId, isOwner }: Props) {
     const [email, setEmail] = useState('')
     const [loading, setLoading] = useState(false)
     const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
+    const [errorMessage, setErrorMessage] = useState('')
 
     if (!isOwner) return null
 
@@ -33,9 +34,12 @@ export default function CoAuthorInvite({ bookId, isOwner }: Props) {
                 setEmail('')
                 setTimeout(() => setIsOpen(false), 2000)
             } else {
+                const data = await res.json()
+                setErrorMessage(data.error || 'Failed to send invite.')
                 setStatus('error')
             }
         } catch {
+            setErrorMessage('An unexpected error occurred.')
             setStatus('error')
         } finally {
             setLoading(false)
@@ -93,7 +97,7 @@ export default function CoAuthorInvite({ bookId, isOwner }: Props) {
                     )}
                     {status === 'error' && (
                         <p style={{ color: '#ef4444', fontSize: 12, marginTop: 12, fontWeight: 500, textAlign: 'center' }}>
-                            Failed to send invite.
+                            {errorMessage}
                         </p>
                     )}
                 </div>

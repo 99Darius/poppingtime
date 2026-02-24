@@ -38,3 +38,41 @@ export async function PATCH(request: NextRequest, { params }: Props) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(book)
 }
+
+export async function DELETE(request: NextRequest, { params }: Props) {
+    const { bookId } = await params
+
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // Verify ownership
+    const { data: book } = await supabase
+        .from('books')
+        .select('owner_id')
+        .eq('id', bookId)
+        .single()
+
+    if (!book) {
+        return NextResponse.json({ error: 'Book not found' }, { status: 404 })
+    }
+
+    if (book.owner_id !== user.id) {
+        return NextResponse.json({ error: 'Only the book owner can delete this book' }, { status: 403 })
+    }
+
+    // Database CASCADE deletes will handle clearing chapters, logs, illustate data, etc.
+    const { error } = await supabase
+        .from('books')
+        .delete()
+        .eq('id', bookId)
+
+    if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true })
+}

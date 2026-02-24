@@ -5,8 +5,9 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 export async function rewriteChapter(
     transcript: string,
     model: string,
+    prompt: string,
     temperature: number = 0.0
-): Promise<string> {
+): Promise<{ text: string; usage: any }> {
     const response = await openai.chat.completions.create({
         model: model.startsWith('claude') ? 'gpt-5.2' : model,
         temperature: 0.0, // Force 0 for strict cleanup
@@ -14,7 +15,7 @@ export async function rewriteChapter(
         messages: [
             {
                 role: 'system',
-                content: 'You are an editor. Your ONLY job is to clean up a voice-recorded transcript. Fix obvious speech recognition errors, spelling, and grammar. Do NOT change the sentence structure, length, meaning, creativity, or voice. Let the user keep the exact essence of what they recorded.',
+                content: prompt,
             },
             {
                 role: 'user',
@@ -23,13 +24,16 @@ export async function rewriteChapter(
         ],
     })
 
-    return response.choices[0]?.message?.content || transcript
+    return {
+        text: response.choices[0]?.message?.content || transcript,
+        usage: response.usage || null
+    }
 }
 
 export async function rewriteBook(
     chapters: { chapterNumber: number; transcript: string }[],
     model: string
-): Promise<string> {
+): Promise<{ text: string; usage: any }> {
     const allChapters = chapters
         .map((c) => `Chapter ${c.chapterNumber}:\n${c.transcript}`)
         .join('\n\n---\n\n')
@@ -49,5 +53,8 @@ export async function rewriteBook(
         ],
     })
 
-    return response.choices[0]?.message?.content || allChapters
+    return {
+        text: response.choices[0]?.message?.content || allChapters,
+        usage: response.usage || null
+    }
 }

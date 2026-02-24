@@ -12,11 +12,14 @@ export default function SettingsPage() {
     const [saving, setSaving] = useState(false)
     const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
     const [errorMessage, setErrorMessage] = useState('')
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+    const [deleting, setDeleting] = useState(false)
 
     const [displayName, setDisplayName] = useState('')
     const [childName, setChildName] = useState('')
     const [password, setPassword] = useState('')
     const [email, setEmail] = useState('')
+    const [coauthors, setCoauthors] = useState<{ id: string, email: string, displayName: string }[]>([])
 
     useEffect(() => {
         async function loadUser() {
@@ -25,6 +28,12 @@ export default function SettingsPage() {
                 setEmail(user.email || '')
                 setDisplayName(user.user_metadata?.display_name || '')
                 setChildName(user.user_metadata?.child_name || '')
+
+                const res = await fetch('/api/settings/coauthors')
+                if (res.ok) {
+                    const data = await res.json()
+                    setCoauthors(data.coauthors || [])
+                }
             }
             setLoading(false)
         }
@@ -57,6 +66,15 @@ export default function SettingsPage() {
                 setPassword('') // Clear password field on success
             }
 
+            // Update co-authors
+            for (const c of coauthors) {
+                await fetch('/api/settings/coauthors', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ coauthorId: c.id, displayName: c.displayName })
+                })
+            }
+
             setStatus('success')
             setTimeout(() => setStatus('idle'), 3000)
         } catch (error: any) {
@@ -64,6 +82,22 @@ export default function SettingsPage() {
             setErrorMessage(error.message || 'Failed to update settings')
         } finally {
             setSaving(false)
+        }
+    }
+
+    async function handleDeleteAccount() {
+        setDeleting(true)
+        try {
+            const res = await fetch('/api/user/delete', { method: 'DELETE' })
+            if (!res.ok) throw new Error('Failed to delete account')
+
+            // Log out and redirect
+            await supabase.auth.signOut()
+            window.location.href = '/'
+        } catch (error: any) {
+            alert(error.message)
+            setDeleting(false)
+            setShowDeleteConfirm(false)
         }
     }
 
@@ -129,6 +163,33 @@ export default function SettingsPage() {
                         </p>
                     </div>
 
+                    {coauthors.length > 0 && (
+                        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 20, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                            <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Co-Authors</h3>
+                            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -10 }}>
+                                Update the display names of people you have invited to co-author your books.
+                            </p>
+                            {coauthors.map((c, idx) => (
+                                <div key={c.id}>
+                                    <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>
+                                        {c.email}
+                                    </label>
+                                    <input
+                                        type="text"
+                                        className="input"
+                                        placeholder="Co-author's display name (e.g. Grandma, Uncle Joe)"
+                                        value={c.displayName}
+                                        onChange={(e) => {
+                                            const newCoauthors = [...coauthors]
+                                            newCoauthors[idx].displayName = e.target.value
+                                            setCoauthors(newCoauthors)
+                                        }}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
                     <div style={{ borderTop: '1px solid var(--border)', paddingTop: 20, marginTop: 4 }}>
                         <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>
                             New Password (Optional)
@@ -163,6 +224,59 @@ export default function SettingsPage() {
 
                 </form>
             </div>
+
+            {/* Danger Zone */}
+            <div className="card" style={{ padding: 32, marginTop: 24 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#ef4444', marginBottom: 8 }}>Danger Zone</h3>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                    Permanently delete your account and all associated data. This action cannot be undone.
+                </p>
+                <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="btn-secondary"
+                    style={{ color: '#ef4444', borderColor: '#ef4444' }}
+                >
+                    🗑 Delete Account
+                </button>
+            </div>
+
+            {/* Delete Confirmation Modal */}
+            {showDeleteConfirm && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0,0,0,0.5)', zIndex: 1000,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                    <div className="card slide-up" style={{ padding: 32, maxWidth: 400, width: '90%', textAlign: 'center' }}>
+                        <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+                        <h3 style={{ fontSize: 20, fontWeight: 700, color: '#ef4444', marginBottom: 12 }}>
+                            Delete Account?
+                        </h3>
+                        <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 24, lineHeight: 1.5 }}>
+                            Are you absolutely sure? This will permanently delete your account, your profile, your stories, and any co-author access you have. <strong style={{ color: '#000' }}>This action cannot be undone.</strong>
+                        </p>
+
+                        <div style={{ display: 'flex', gap: 12 }}>
+                            <button
+                                onClick={() => setShowDeleteConfirm(false)}
+                                className="btn-secondary"
+                                style={{ flex: 1, justifyContent: 'center' }}
+                                disabled={deleting}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleDeleteAccount}
+                                className="btn-primary"
+                                style={{ flex: 1, justifyContent: 'center', background: '#ef4444' }}
+                                disabled={deleting}
+                            >
+                                {deleting ? 'Deleting...' : 'Yes, Delete Hub'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

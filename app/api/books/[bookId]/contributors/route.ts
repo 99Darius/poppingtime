@@ -26,11 +26,9 @@ export async function POST(request: NextRequest, { params }: Props) {
     const existingUser = users?.find((u) => u.email === email)
 
     if (existingUser) {
-        // Add as contributor directly
-        await serviceClient.from('book_contributors').upsert({
-            book_id: bookId,
-            user_id: existingUser.id,
-        })
+        return NextResponse.json({
+            error: "We cannot invite this co-author as they already have an account. They must delete their account before they can be invited, or you can use another email address."
+        }, { status: 400 })
     }
 
     // Send invite email regardless

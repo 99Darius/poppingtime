@@ -57,10 +57,13 @@ export interface AdminConfig {
     id: number
     rewrite_model: string
     plot_model: string
+    image_model: string
     image_style: string
     plot_tone: string
     plot_max_bullets: number
     creativity_level: number
+    rewrite_prompt: string
+    plot_prompt: string
     updated_at: string
 }
 
