@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import CoAuthorInvite from '@/components/CoAuthorInvite'
+import MobileNav from '@/components/MobileNav'
+import PWAPrompt from '@/components/PWAPrompt'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
     const supabase = await createClient()
@@ -79,13 +81,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     return (
         <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: 'var(--cream)' }}>
             {/* Global Top Bar */}
-            <header style={{
+            <header className="px-4 md:px-6" style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '6px 24px', background: 'white', borderBottom: '1px solid var(--border)',
+                paddingTop: 6, paddingBottom: 6, background: 'white', borderBottom: '1px solid var(--border)',
                 position: 'sticky', top: 0, zIndex: 100
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <img src="/logo.png" alt="Popping Time Logo" width={48} height={48} style={{ borderRadius: 8 }} />
+                    <MobileNav currentBooks={currentBooks} completedBooks={completedBooks} />
+                    <img className="hidden md:block" src="/logo.png" alt="Popping Time Logo" width={48} height={48} style={{ borderRadius: 8 }} />
                     <Link href="/dashboard" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 10 }}>
                         <span className="serif" style={{ fontSize: 20, fontWeight: 700, color: 'var(--purple-deep)' }}>
                             Popping Time
@@ -93,11 +96,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     </Link>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 
                     {/* Active Co-Authors Display */}
                     {activeCoAuthors.length > 0 && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginRight: 8 }}>
+                        <div className="hidden md:flex" style={{ alignItems: 'center', gap: 4, marginRight: 8 }}>
                             <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Co-authors:</span>
                             {activeCoAuthors.map((c, i) => (
                                 <span key={i} style={{ fontSize: 13, fontWeight: 500, color: 'var(--purple-deep)', background: 'var(--purple-pale)', padding: '4px 10px', borderRadius: 12 }}>
@@ -108,15 +111,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                     )}
 
                     {books && books.length > 0 && (
-                        <CoAuthorInvite bookId={books[0].id} isOwner={books[0].owner_id === user.id} />
+                        <div className="hidden md:block">
+                            <CoAuthorInvite bookId={books[0].id} isOwner={books[0].owner_id === user.id} />
+                        </div>
                     )}
 
                     {/* My Name */}
-                    <span style={{ fontSize: 14, color: 'var(--purple-deep)', fontWeight: 600, borderLeft: '1px solid var(--border)', paddingLeft: 12 }}>
+                    <span className="hidden md:block" style={{ fontSize: 14, color: 'var(--purple-deep)', fontWeight: 600, borderLeft: '1px solid var(--border)', paddingLeft: 12 }}>
                         {displayName}
                     </span>
 
-                    <Link href="/settings" className="btn-ghost" style={{ fontSize: 13, padding: '6px 12px' }}>⚙️ Settings</Link>
+                    <Link href="/settings" className="btn-ghost" style={{ fontSize: 13, padding: '6px 12px' }}>⚙️ <span className="hidden md:inline">Settings</span></Link>
                     <form action="/api/auth/signout" method="POST" style={{ margin: 0 }}>
                         <button className="btn-ghost" type="submit" style={{ fontSize: 13, padding: '6px 12px' }}>
                             Sign out
@@ -127,12 +132,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
             <div style={{ display: 'flex', flex: 1 }}>
                 {/* Left Sidebar Fixed Navigation */}
-                <aside style={{
+                <aside className="hidden md:flex" style={{
                     width: 260,
                     flexShrink: 0,
                     borderRight: '1px solid var(--border)',
                     background: 'rgba(253, 246, 239, 0.85)',
-                    display: 'flex',
                     flexDirection: 'column',
                 }}>
                     <div style={{ padding: '24px 24px 16px' }}>
@@ -234,7 +238,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 </aside>
 
                 {/* Main scrollable content */}
-                <main style={{ flex: 1, padding: '48px 40px', maxWidth: 800, margin: '0 auto' }}>
+                <main className="flex-1 p-4 md:p-12 w-full max-w-[800px] mx-auto overflow-x-hidden">
+                    <PWAPrompt hasBooks={books.length > 0} />
                     {children}
                 </main>
             </div>

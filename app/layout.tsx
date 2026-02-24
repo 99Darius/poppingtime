@@ -13,6 +13,7 @@ export const metadata: Metadata = {
     description: "Turn bedtime into unforgettable stories your family will treasure forever.",
     images: ["/logo.png"],
   },
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
