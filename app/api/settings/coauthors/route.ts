@@ -80,7 +80,7 @@ export async function PATCH(request: Request) {
 
     const { data: relationship } = await supabase
         .from('book_contributors')
-        .select('id')
+        .select('user_id')
         .eq('user_id', coauthorId)
         .in('book_id', bookIds)
         .limit(1)
@@ -110,5 +110,12 @@ export async function PATCH(request: Request) {
         return NextResponse.json({ error: updateErr.message }, { status: 500 })
     }
 
+    // Also explicitly sync to user_profiles table just in case there's no auth trigger
+    await serviceClient
+        .from('user_profiles')
+        .update({ display_name: displayName })
+        .eq('id', coauthorId)
+
     return NextResponse.json({ success: true })
 }
+
