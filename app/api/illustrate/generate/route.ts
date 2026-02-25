@@ -91,33 +91,44 @@ export async function POST(request: NextRequest) {
         }
 
         // --------------------------------------------------------------------
-        // Generate illustrations for each PAGE sequentially
+        // Generate illustrations for each PAGE in batches (concurrency = 5)
         // --------------------------------------------------------------------
-        const pageData = []
-        let pageIndex = 1
-        for (const page of allPages) {
-            const { content, chapterNumber, illustrationPrompt } = page
+        const CONCURRENCY = 5;
+        const pageData = new Array(allPages.length);
 
-            let illustrationBuffer: Buffer | undefined
-            try {
-                console.log(`Generating illustration for page ${pageIndex} (Chapter ${chapterNumber})...`)
-                illustrationBuffer = await generateIllustration(
-                    illustrationPrompt,
-                    imageStyle,
+        for (let i = 0; i < allPages.length; i += CONCURRENCY) {
+            const batch = allPages.slice(i, i + CONCURRENCY);
+            console.log(`Generating illustrations for pages ${i + 1} to ${Math.min(i + CONCURRENCY, allPages.length)} (Batch ${Math.floor(i / CONCURRENCY) + 1})...`);
+
+            const results = await Promise.all(batch.map(async (page, index) => {
+                const { content, chapterNumber, illustrationPrompt } = page;
+                const pageIndex = i + index + 1;
+
+                let illustrationBuffer: Buffer | undefined;
+                try {
+                    console.log(`Starting image generation for page ${pageIndex} (Chapter ${chapterNumber})...`);
+                    illustrationBuffer = await generateIllustration(
+                        illustrationPrompt,
+                        imageStyle,
+                        chapterNumber,
+                        imageModel,
+                        characterBible
+                    );
+                    console.log(`Finished image for page ${pageIndex}.`);
+                } catch (e) {
+                    console.error(`Illustration generation failed for page ${pageIndex}:`, e);
+                }
+
+                return {
                     chapterNumber,
-                    imageModel,
-                    characterBible
-                )
-            } catch (e) {
-                console.error(`Illustration generation failed for page ${pageIndex}:`, e)
-            }
+                    content,
+                    illustrationBuffer,
+                };
+            }));
 
-            pageData.push({
-                chapterNumber,
-                content,
-                illustrationBuffer,
-            })
-            pageIndex++
+            results.forEach((res, index) => {
+                pageData[i + index] = res;
+            });
         }
 
         // Get author name
