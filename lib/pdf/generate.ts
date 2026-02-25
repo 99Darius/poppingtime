@@ -150,44 +150,51 @@ export async function generateStoryPDF(
             page.drawRectangle({ x: 0, y: 0, width: PAGE_SIZE, height: PAGE_SIZE, color: rgb(0.95, 0.93, 0.9) })
         }
 
-        // 2. Text layout calculations — compact, right-inset
+        // 2. Text layout calculations — full width centered
         const bodyLines = wrapText(chapter.content, TEXT_MAX_W - TEXT_PADDING_X * 2, fontRegular, BODY_FONT_SIZE)
         const isNewChapter = chapter.chapterNumber !== lastChapterNumber
         const chapterHeaderH = isNewChapter ? 28 : 0
         const textContentH = bodyLines.length * BODY_LINE_HEIGHT + chapterHeaderH
         const boxH = textContentH + TEXT_PADDING_Y * 2
 
-        // Compute actual width needed (based on longest line)
-        const maxLineW = Math.max(
-            ...bodyLines.map(l => fontRegular.widthOfTextAtSize(l, BODY_FONT_SIZE)),
-            isNewChapter ? fontBold.widthOfTextAtSize(`CHAPTER ${chapter.chapterNumber}`, 13) : 0
-        )
-        const boxW = Math.min(TEXT_MAX_W, maxLineW + TEXT_PADDING_X * 2 + 12)
-
         const isTop = chapter.textPlacement === 'top'
 
-        // Position: inset from the right edge, at top or bottom
-        const boxX = PAGE_SIZE - boxW - 24
-        const boxY = isTop ? PAGE_SIZE - boxH - 16 : 16
+        // 3. Draw Soft Gradient Background
+        // Extends ~80px beyond strictly needed boxH for a slow, gentle fade into the art
+        const gradientHeight = boxH + 80
+        const STEPS = 40;
 
-        // 3. Draw compact rounded-rectangle backdrop (semi-transparent white)
-        // pdf-lib doesn't have borderRadius so we draw a simple rect with slight appearance tricks
-        page.drawRectangle({
-            x: boxX,
-            y: boxY,
-            width: boxW,
-            height: boxH,
-            color: rgb(1, 1, 1),
-            opacity: 0.88,
-        })
+        for (let idx = 0; idx < STEPS; idx++) {
+            const progress = idx / STEPS;
+            // Easing function: start nearly opaque (0.95), fade quadratically for a smooth edge
+            const opacity = 0.95 * Math.pow(1 - progress, 2);
 
-        // 4. Draw Text Elements
-        let curY = boxY + boxH - TEXT_PADDING_Y - 4
+            const stepHeight = gradientHeight / STEPS;
+            const yRect = isTop
+                ? PAGE_SIZE - (stepHeight * (idx + 1)) // stepping down from top edge
+                : stepHeight * idx; // stepping up from bottom edge
+
+            page.drawRectangle({
+                x: 0,
+                y: yRect,
+                width: PAGE_SIZE,
+                height: stepHeight + 1.5, // +1.5 overlap to prevent visible seams
+                color: rgb(1, 1, 1),
+                opacity: opacity
+            });
+        }
+
+        // 4. Draw Text Elements (Centered horizontally)
+        // Set starting Y depending on top/bottom placement
+        let curY = isTop
+            ? PAGE_SIZE - TEXT_PADDING_Y - 20
+            : boxH - TEXT_PADDING_Y;
 
         if (isNewChapter) {
             const chapterLabel = `CHAPTER ${chapter.chapterNumber}`
+            const lblWidth = fontBold.widthOfTextAtSize(chapterLabel, 13)
             page.drawText(chapterLabel, {
-                x: boxX + TEXT_PADDING_X,
+                x: (PAGE_SIZE - lblWidth) / 2,
                 y: curY,
                 size: 13,
                 font: fontBold,
@@ -199,13 +206,15 @@ export async function generateStoryPDF(
 
         for (const line of bodyLines) {
             if (curY < MARGIN) {
+                // Rare edge case: extremely long text spills. Create a blank white safety page.
                 page = doc.addPage([PAGE_SIZE, PAGE_SIZE])
                 page.drawRectangle({ x: 0, y: 0, width: PAGE_SIZE, height: PAGE_SIZE, color: rgb(1, 1, 1) })
                 curY = PAGE_SIZE - MARGIN - 40
             }
 
+            const lineWidth = fontRegular.widthOfTextAtSize(line, BODY_FONT_SIZE)
             page.drawText(line, {
-                x: boxX + TEXT_PADDING_X,
+                x: (PAGE_SIZE - lineWidth) / 2,
                 y: curY,
                 size: BODY_FONT_SIZE,
                 font: fontRegular,

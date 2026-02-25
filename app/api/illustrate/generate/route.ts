@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { generateIllustration, generateCharacterBible } from '@/lib/ai/illustrate'
+import { generateIllustration, generateCharacterBible, generateReferenceImage } from '@/lib/ai/illustrate'
+import { determineOptimalTextPlacement } from '@/lib/ai/image-analysis'
 import { generateStoryPDF } from '@/lib/pdf/generate'
 import { sendIllustratedBookReadyEmail } from '@/lib/resend'
 
@@ -61,6 +62,13 @@ export async function POST(request: NextRequest) {
         } catch (e) {
             console.error('Failed to generate character bible:', e)
             // graceful degradation: just proceed without it
+        }
+
+        // Under generation of character bible:
+        let referenceBuffer: Buffer | null = null;
+        if (characterBible) {
+            console.log('Generating master reference image...');
+            referenceBuffer = await generateReferenceImage(characterBible, imageStyle, imageModel);
         }
 
         // --------------------------------------------------------------------
@@ -127,6 +135,8 @@ export async function POST(request: NextRequest) {
                 const pageIndex = i + index + 1;
 
                 let illustrationBuffer: Buffer | undefined;
+                let optimalPlacement: 'top' | 'bottom' = textPlacement;
+
                 try {
                     console.log(`Starting image generation for page ${pageIndex} (Chapter ${chapterNumber})...`);
                     illustrationBuffer = await generateIllustration(
@@ -135,9 +145,14 @@ export async function POST(request: NextRequest) {
                         chapterNumber,
                         imageModel,
                         characterBible,
+                        referenceBuffer || undefined,
                         textPlacement
                     );
-                    console.log(`Finished image for page ${pageIndex}.`);
+
+                    if (illustrationBuffer) {
+                        optimalPlacement = await determineOptimalTextPlacement(illustrationBuffer);
+                    }
+                    console.log(`Finished image for page ${pageIndex}. Optimal text placement: ${optimalPlacement}`);
                 } catch (e) {
                     console.error(`Illustration generation failed for page ${pageIndex}:`, e);
                 }
@@ -146,7 +161,7 @@ export async function POST(request: NextRequest) {
                     chapterNumber,
                     content,
                     illustrationBuffer,
-                    textPlacement
+                    textPlacement: optimalPlacement
                 };
             }));
 

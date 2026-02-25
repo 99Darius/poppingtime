@@ -54,6 +54,55 @@ Format as a numbered list. Do NOT include any narrative or explanation — only 
 }
 
 /**
+ * Generate a Master Character Reference Image.
+ * This creates a single visual source of truth from the Character Bible,
+ * which will be injected as an image prompt into all subsequent chapter generation calls.
+ */
+export async function generateReferenceImage(
+    characterBible: string,
+    imageStyle: string,
+    imageModel: string
+): Promise<Buffer | null> {
+    if (!imageModel.includes('gemini')) return null;
+
+    const prompt = `Art style: ${imageStyle}\n\nCreate a clean character design reference sheet for the following characters on a pure white background. DO NOT add any text or background scenery. Maintain exactly these visual traits:\n\n${characterBible}`;
+
+    const apiKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+    if (!apiKey) throw new Error('Missing GOOGLE_API_KEY');
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${imageModel}:generateContent?key=${apiKey}`;
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { responseModalities: ['IMAGE', 'TEXT'] }
+            })
+        });
+
+        if (!response.ok) {
+            console.warn(`Reference image generation failed with status ${response.status}`);
+            return null;
+        }
+
+        const data = await response.json();
+        const imagePart = data?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData?.mimeType?.startsWith('image/'));
+
+        if (!imagePart?.inlineData?.data) {
+            console.warn('No image data in Gemini reference image response');
+            return null;
+        }
+
+        return Buffer.from(imagePart.inlineData.data, 'base64');
+    } catch (e) {
+        console.error("Reference image execution failed, falling back to text-only", e);
+        return null; // Graceful fallback
+    }
+}
+
+/**
  * Generate a full-page illustration for a single chapter.
  * The prompt is built from: art style + character bible + scene + text-safe-zone instructions.
  */
@@ -63,6 +112,7 @@ export async function generateIllustration(
     chapterNumber: number,
     imageModel: string,
     characterBible?: string,
+    referenceImageBuffer?: Buffer,
     textPlacement: 'top' | 'bottom' = 'bottom'
 ): Promise<Buffer> {
     const sceneText = chapterText.substring(0, 600)
@@ -71,22 +121,18 @@ export async function generateIllustration(
     // PATH A: Google / Gemini Native Image Generation
     // ------------------------------------------------------------------------
     if (imageModel.includes('gemini')) {
-        // Build the strict prompt for Gemini Identity Lock
         const parts: string[] = []
         parts.push(`Art style: ${imageStyle}`)
 
         if (characterBible) {
-            parts.push(`CHARACTER BIBLE — YOU MUST follow these exact visual descriptions for EVERY character and object. This is a STRICT visual identity lock. Do NOT deviate from ANY detail listed below. Do NOT add any characters, animals, or objects not listed here:\n${characterBible}`)
+            parts.push(`CHARACTER BIBLE: You MUST follow these exact visual descriptions. DO NOT deviate.\n${characterBible}`)
+        }
+        if (referenceImageBuffer) {
+            parts.push(`REFERENCE IMAGE PROVIDED: You MUST visually match the characters exactly as they appear in the attached reference image.`)
         }
 
         parts.push(`Scene for Chapter ${chapterNumber}: ${sceneText}`)
-        const layoutInstruction = textPlacement === 'top'
-            ? `LAYOUT: Full-page square illustration. Keep the TOP 20% simple/minimal (sky, ceiling, soft gradient). Main action and characters go in the CENTER and BOTTOM 80%. Do NOT include any text, words, letters, or writing in the image.`
-            : `LAYOUT: Full-page square illustration. Keep the BOTTOM 20% simple/minimal (ground, floor, grass). Main action and characters go in the TOP and CENTER 80%. Do NOT include any text, words, letters, or writing in the image.`
-
-        parts.push(layoutInstruction)
-        parts.push(`CRITICAL: Do NOT invent or add ANY characters, animals, sidekicks, pets, or objects that are NOT explicitly mentioned in the story text or the character bible above. Maintain EXACT visual consistency for all characters across every page.`)
-        parts.push(`High quality, detailed, warm and inviting, age-appropriate for children ages 4-10. No text in image.`)
+        parts.push(`LAYOUT: Full-page square illustration. Compose the scene naturally. Do NOT include any text, words, letters, or writing in the image.`)
 
         const prompt = parts.join('\n\n')
 
@@ -96,13 +142,21 @@ export async function generateIllustration(
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${imageModel}:generateContent?key=${apiKey}`
 
+        const contentsParts: any[] = [{ text: prompt }];
+        if (referenceImageBuffer) {
+            contentsParts.unshift({
+                inlineData: {
+                    data: referenceImageBuffer.toString('base64'),
+                    mimeType: 'image/jpeg'
+                }
+            });
+        }
+
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                contents: [{
-                    parts: [{ text: prompt }]
-                }],
+                contents: [{ parts: contentsParts }],
                 generationConfig: {
                     responseModalities: ['IMAGE', 'TEXT'],
                     temperature: 0.4,
@@ -117,7 +171,6 @@ export async function generateIllustration(
 
         const data = await response.json()
 
-        // Extract image from response parts
         const candidates = data?.candidates
         if (!candidates || candidates.length === 0) throw new Error('No candidates in Gemini response')
 
@@ -140,11 +193,7 @@ export async function generateIllustration(
         parts.push(`CHARACTER REFERENCE (maintain these exact appearances throughout):\n${characterBible}`)
     }
     parts.push(`Scene for Chapter ${chapterNumber}: ${sceneText}`)
-    const layoutInstruction = textPlacement === 'top'
-        ? `IMPORTANT LAYOUT INSTRUCTIONS: This is a full-page illustration for a children's picture book. The illustration must fill the entire square canvas. Leave the TOP 25% of the image as a simpler, less detailed area (such as open sky, ceiling, soft clouds, or a soft gradient) so that story text can be overlaid there. Do NOT include any text, words, letters, or writing in the image. The BOTTOM 75% should contain the main scene action and characters.`
-        : `IMPORTANT LAYOUT INSTRUCTIONS: This is a full-page illustration for a children's picture book. The illustration must fill the entire square canvas. Leave the BOTTOM 25% of the image as a simpler, less detailed area (such as ground, floor, grass, water, mist, or a soft gradient) so that story text can be overlaid there. Do NOT include any text, words, letters, or writing in the image. The TOP 75% should contain the main scene action and characters.`
-
-    parts.push(layoutInstruction)
+    parts.push(`LAYOUT: Full-page square illustration. Compose the scene naturally. Do NOT include any text, words, letters, or writing in the image.`)
     parts.push(`CRITICAL: Do NOT invent, assume, or add ANY characters, animals, sidekicks, or pets that are NOT explicitly mentioned in the text above.`)
     parts.push(`High quality, detailed, warm and inviting, age-appropriate for children ages 4-10. No text in image.`)
 
