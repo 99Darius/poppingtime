@@ -60,13 +60,16 @@ export default function StoryFeed({ chapters, bookId, bookStatus, bookTitle }: S
                     </>
                 )}
                 {bookStatus === 'ended' && (
-                    <a href={`/books/${bookId}/illustrate`} className="btn-primary" style={{
-                        flex: 1,
-                        justifyContent: 'center',
-                        background: 'linear-gradient(135deg, #f59e0b, #f97316)',
-                    }}>
-                        🎨 Create Illustrated Book
-                    </a>
+                    <>
+                        <a href={`/books/${bookId}/illustrate`} className="btn-primary" style={{
+                            flex: 1,
+                            justifyContent: 'center',
+                            background: 'linear-gradient(135deg, #f59e0b, #f97316)',
+                        }}>
+                            🎨 Create Illustrated Book
+                        </a>
+                        <AiCleanupButton bookId={bookId} />
+                    </>
                 )}
             </div>
 
@@ -164,5 +167,37 @@ function EndBookButton({ bookId }: { bookId: string }) {
                 </div>
             )}
         </>
+    )
+}
+
+function AiCleanupButton({ bookId }: { bookId: string }) {
+    const [isLoading, setIsLoading] = useState(false)
+
+    async function handleCleanup() {
+        if (!confirm('This will scan the entire book and permanently fix typos, spelling, and character name continuity errors (e.g. converting "cart" to "card" if misheard by voice dictation). This cannot be undone. Proceed?')) {
+            return
+        }
+
+        setIsLoading(true)
+        try {
+            const res = await fetch(`/api/books/${bookId}/cleanup-all`, { method: 'POST' })
+            if (!res.ok) throw new Error('Cleanup failed')
+            window.location.reload()
+        } catch (e) {
+            console.error(e)
+            alert('Failed to run cleanup.')
+            setIsLoading(false)
+        }
+    }
+
+    return (
+        <button
+            onClick={handleCleanup}
+            disabled={isLoading}
+            className="btn-secondary"
+            style={{ flex: 1, justifyContent: 'center', color: 'var(--purple-deep)', borderColor: 'var(--purple-deep)' }}
+        >
+            {isLoading ? <span className="spinner" style={{ borderColor: 'var(--purple-deep)', borderTopColor: 'transparent' }} /> : '✨ Whole Book AI Cleanup'}
+        </button>
     )
 }

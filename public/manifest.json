@@ -1,0 +1,16 @@
+{
+    "name": "Popping Time",
+    "short_name": "Popping Time",
+    "description": "Turn your bedtime stories into beautiful illustrated books.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#fdf6ef",
+    "theme_color": "#2d1f4e",
+    "icons": [
+        {
+            "src": "/logo.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}

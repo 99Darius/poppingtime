@@ -1,4 +1,5 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { getPrimaryAccountId } from '@/lib/auth/helper'
 import { redirect } from 'next/navigation'
 import type { Book, Chapter } from '@/lib/types'
 import StoryFeed from '@/components/StoryFeed'
@@ -14,22 +15,24 @@ export default async function BookPage({ params }: Props) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) redirect('/login')
 
-    const { data: book } = await supabase
+    const accountId = getPrimaryAccountId(user)
+    const serviceClient = await createServiceClient()
+    const { data: book } = await serviceClient
         .from('books')
         .select('*')
         .eq('id', bookId)
         .single()
 
-    if (!book) redirect('/')
+    if (!book || book.owner_id !== accountId) redirect('/')
 
-    const { data: chapters } = await supabase
+    const { data: chapters } = await serviceClient
         .from('chapters')
         .select('*')
         .eq('book_id', bookId)
         .order('chapter_number', { ascending: true })
 
     // Fetch illustrated book PDF if available
-    const { data: illustratedBooks } = await supabase
+    const { data: illustratedBooks } = await serviceClient
         .from('illustrated_books')
         .select('id, status, download_url')
         .eq('book_id', bookId)
@@ -81,7 +84,7 @@ export default async function BookPage({ params }: Props) {
                                         gap: 6,
                                     }}
                                 >
-                                    📖 View Illustrated Book {illustratedBooks.length > 1 ? `v${illustratedBooks.length - index}` : ''}
+                                    📖 View Illustrated Book {illustratedBooks.length > 1 ? `v${index + 1}` : ''}
                                 </a>
                             ))}
                         </div>

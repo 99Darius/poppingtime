@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import type { Book, Chapter } from '@/lib/types'
 import StoryFeed from '@/components/StoryFeed'
 import CoAuthorInvite from '@/components/CoAuthorInvite'
+import { getPrimaryAccountId } from '@/lib/auth/helper'
 
 export default async function HomePage() {
     const supabase = await createClient()
@@ -13,10 +14,11 @@ export default async function HomePage() {
     const service = await createServiceClient()
 
     // Get most recently active book
+    const accountId = getPrimaryAccountId(user)
     const { data: books } = await service
         .from('books')
-        .select('*, book_contributors!inner(user_id)')
-        .eq('book_contributors.user_id', user.id)
+        .select('*')
+        .eq('owner_id', accountId)
         .order('updated_at', { ascending: false })
         .limit(1)
 

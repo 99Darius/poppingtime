@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { getPrimaryAccountId } from '@/lib/auth/helper'
 
 export async function POST(request: NextRequest) {
     const supabase = await createClient()
@@ -7,6 +8,7 @@ export async function POST(request: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { title } = await request.json()
+    const accountId = getPrimaryAccountId(user)
 
     // Use service client to bypass RLS (avoids infinite recursion in books policy)
     const serviceClient = await createServiceClient()
@@ -14,7 +16,7 @@ export async function POST(request: NextRequest) {
     const { data: book, error } = await serviceClient
         .from('books')
         .insert({
-            owner_id: user.id,
+            owner_id: accountId,
             title: title || 'My Story',
         })
         .select()

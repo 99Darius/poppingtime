@@ -1,9 +1,10 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import CoAuthorInvite from '@/components/CoAuthorInvite'
 import MobileNav from '@/components/MobileNav'
 import PWAPrompt from '@/components/PWAPrompt'
+import { getPrimaryAccountId } from '@/lib/auth/helper'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
     const supabase = await createClient()
@@ -13,8 +14,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         redirect('/login')
     }
 
-    // Fetch books user owns
-    const { data: ownedBooks } = await supabase
+    // Fetch all books for the primary account using serviceClient to bypass RLS for co-authors
+    const accountId = getPrimaryAccountId(user)
+    const serviceClient = await createServiceClient()
+    const { data: booksData } = await serviceClient
         .from('books')
         .select(`
             id, 
@@ -22,38 +25,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             owner_id, 
             status,
             updated_at,
-            book_contributors(user_id),
             illustrated_books(id, status, download_url)
         `)
-        .eq('owner_id', user.id)
+        .eq('owner_id', accountId)
+        .order('updated_at', { ascending: false })
 
-    // Fetch books user is a contributor to
-    const { data: contributedBooks } = await supabase
-        .from('books')
-        .select(`
-            id, 
-            title, 
-            owner_id, 
-            status,
-            updated_at,
-            book_contributors!inner(user_id),
-            illustrated_books(id, status, download_url)
-        `)
-        .eq('book_contributors.user_id', user.id)
-
-    // Merge and deduplicate
-    const allBooks = [...(ownedBooks || []), ...(contributedBooks || [])]
-    const booksMap = new Map()
-    allBooks.forEach(b => {
-        if (!booksMap.has(b.id)) {
-            booksMap.set(b.id, b)
-        }
-    })
-
-    // Sort descending by updated_at
-    const books = Array.from(booksMap.values()).sort((a, b) => {
-        return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-    })
+    const books = booksData || []
 
     const currentBooks = books.filter(b => {
         const hasCompletedPdf = b.illustrated_books?.some((ib: any) => ib.status === 'complete')
@@ -64,16 +41,26 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         return b.status === 'ended' || b.illustrated_books?.some((ib: any) => ib.status === 'complete')
     })
 
-    // Fetch active book's co-authors to display on the top right
+    // Fetch all co-authors on this account to display on the top right
     let activeCoAuthors: any[] = []
     if (books && books.length > 0) {
-        const { data: contribs } = await supabase
+        const { data: contribs } = await serviceClient
             .from('book_contributors')
             .select('user_profiles(display_name)')
-            .eq('book_id', books[0].id)
+            .in('book_id', books.map(b => b.id))
             .neq('user_id', user.id) // Exclude self
 
-        if (contribs) activeCoAuthors = contribs
+        if (contribs) {
+            // Deduplicate by display name so the header is clean
+            const seen = new Set()
+            activeCoAuthors = contribs.filter(c => {
+                const profile: any = c.user_profiles
+                const name = Array.isArray(profile) ? profile[0]?.display_name : profile?.display_name
+                if (!name || seen.has(name)) return false
+                seen.add(name)
+                return true
+            })
+        }
     }
 
     const displayName = user.user_metadata?.display_name || user.email?.split('@')[0]
@@ -112,7 +99,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
                     {books && books.length > 0 && (
                         <div className="hidden md:block">
-                            <CoAuthorInvite bookId={books[0].id} isOwner={books[0].owner_id === user.id} />
+                            <CoAuthorInvite bookId={books[0].id} isOwner={books[0].owner_id === accountId} />
                         </div>
                     )}
 

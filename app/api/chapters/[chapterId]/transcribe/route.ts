@@ -16,7 +16,7 @@ export async function POST(_: NextRequest, { params }: Props) {
         // Get chapter
         const { data: chapter } = await supabase
             .from('chapters')
-            .select('*, books(title, id)')
+            .select('*, books(title, id, owner_id)')
             .eq('id', chapterId)
             .single()
 
@@ -55,23 +55,20 @@ export async function POST(_: NextRequest, { params }: Props) {
 
         // Send email notifications to all contributors
         const bookData = chapter.books as any
-        if (bookData) {
-            const { data: contributors } = await supabase
-                .from('book_contributors')
-                .select('user_id')
-                .eq('book_id', bookData.id)
+        if (bookData && bookData.owner_id) {
+            // Find all users who are either the owner or co-authors
+            const { data: profiles } = await supabase
+                .from('user_profiles')
+                .select('id')
+                .or(`id.eq.${bookData.owner_id},primary_account_id.eq.${bookData.owner_id}`)
 
-            if (contributors?.length) {
-                const { data: users } = await supabase
-                    .from('user_profiles')
-                    .select('id')
-                    .in('id', contributors.map((c: any) => c.user_id))
-
+            if (profiles?.length) {
                 // Get emails from auth.users
                 const emails: string[] = []
-                for (const u of users || []) {
-                    const { data: authData } = await supabase.auth.admin.getUserById(u.id)
-                    if (authData?.user?.email && authData.user.email !== chapter.author_id) {
+                for (const p of profiles) {
+                    const { data: authData } = await supabase.auth.admin.getUserById(p.id)
+                    // Don't email the person who just recorded the chapter
+                    if (authData?.user?.email && authData.user.id !== chapter.author_id) {
                         emails.push(authData.user.email)
                     }
                 }

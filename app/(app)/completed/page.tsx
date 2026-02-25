@@ -1,6 +1,7 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { getPrimaryAccountId } from '@/lib/auth/helper'
 
 export default async function CompletedBooksPage() {
     const supabase = await createClient()
@@ -10,24 +11,20 @@ export default async function CompletedBooksPage() {
         redirect('/login')
     }
 
-    // 1. Find all books the user has access to (owner or contributor)
-    const { data: ownedBooks } = await supabase
+    // 1. Find all books the user has access to under their primary account
+    const accountId = getPrimaryAccountId(user)
+    const serviceClient = await createServiceClient()
+    const { data: allBooks } = await serviceClient
         .from('books')
         .select('id')
-        .eq('owner_id', user.id)
+        .eq('owner_id', accountId)
 
-    const { data: contributedBooks } = await supabase
-        .from('books')
-        .select('id, book_contributors!inner(user_id)')
-        .eq('book_contributors.user_id', user.id)
-
-    const allBooks = [...(ownedBooks || []), ...(contributedBooks || [])]
-    const bookIds = Array.from(new Set(allBooks.map(b => b.id)))
+    const bookIds = Array.from(new Set((allBooks || []).map(b => b.id)))
 
     // 2. Fetch all completed PDFs (illustrated_books) for those books
     let completedBooks: any[] = []
     if (bookIds.length > 0) {
-        const { data: illustrated } = await supabase
+        const { data: illustrated } = await serviceClient
             .from('illustrated_books')
             .select('id, book_id, pdf_url, created_at, status, books(title)')
             .in('book_id', bookIds)

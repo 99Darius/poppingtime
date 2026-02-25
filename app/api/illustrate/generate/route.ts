@@ -64,20 +64,39 @@ export async function POST(request: NextRequest) {
         }
 
         // --------------------------------------------------------------------
-        // Paginate Chapters
+        // Paginate Chapters — with smart page budget allocation
         // --------------------------------------------------------------------
         const { paginateChapter } = await import('@/lib/ai/pagination')
-        const allPages: { chapterNumber: number; content: string; illustrationPrompt: string }[] = []
+        const allPages: { chapterNumber: number; content: string; illustrationPrompt: string; textPlacement: 'top' | 'bottom' }[] = []
 
-        for (const c of chaptersWithText) {
+        const MAX_TOTAL_PAGES = 30
+        // Compute proportional page budgets based on text length
+        const totalCharacters = chaptersWithText.reduce((sum, c) => sum + c.content.length, 0)
+        const chapterBudgets = chaptersWithText.map(c => {
+            const proportion = totalCharacters > 0 ? c.content.length / totalCharacters : 1 / chaptersWithText.length
+            return Math.max(2, Math.round(proportion * MAX_TOTAL_PAGES))
+        })
+        // If budget sum exceeds max, proportionally scale down (keeping min 2)
+        let budgetSum = chapterBudgets.reduce((a, b) => a + b, 0)
+        while (budgetSum > MAX_TOTAL_PAGES) {
+            const largestIdx = chapterBudgets.indexOf(Math.max(...chapterBudgets))
+            if (chapterBudgets[largestIdx] <= 2) break
+            chapterBudgets[largestIdx]--
+            budgetSum--
+        }
+
+        for (let ci = 0; ci < chaptersWithText.length; ci++) {
+            const c = chaptersWithText[ci]
+            const budget = chapterBudgets[ci]
             try {
-                console.log(`Paginating chapter ${c.chapterNumber}...`)
-                const { pages } = await paginateChapter(c.content, c.chapterNumber)
+                console.log(`Paginating chapter ${c.chapterNumber} (budget: ${budget} pages)...`)
+                const { pages } = await paginateChapter(c.content, c.chapterNumber, budget)
                 for (const p of pages) {
                     allPages.push({
                         chapterNumber: c.chapterNumber,
                         content: p.content,
                         illustrationPrompt: p.illustrationPrompt,
+                        textPlacement: p.textPlacement || 'bottom'
                     })
                 }
             } catch (e) {
@@ -85,10 +104,13 @@ export async function POST(request: NextRequest) {
                 allPages.push({
                     chapterNumber: c.chapterNumber,
                     content: c.content,
-                    illustrationPrompt: c.content.substring(0, 300)
+                    illustrationPrompt: c.content.substring(0, 300),
+                    textPlacement: 'bottom'
                 })
             }
         }
+
+        console.log(`Total pages after smart pagination: ${allPages.length}`)
 
         // --------------------------------------------------------------------
         // Generate illustrations for each PAGE in batches (concurrency = 5)
@@ -101,7 +123,7 @@ export async function POST(request: NextRequest) {
             console.log(`Generating illustrations for pages ${i + 1} to ${Math.min(i + CONCURRENCY, allPages.length)} (Batch ${Math.floor(i / CONCURRENCY) + 1})...`);
 
             const results = await Promise.all(batch.map(async (page, index) => {
-                const { content, chapterNumber, illustrationPrompt } = page;
+                const { content, chapterNumber, illustrationPrompt, textPlacement } = page;
                 const pageIndex = i + index + 1;
 
                 let illustrationBuffer: Buffer | undefined;
@@ -112,7 +134,8 @@ export async function POST(request: NextRequest) {
                         imageStyle,
                         chapterNumber,
                         imageModel,
-                        characterBible
+                        characterBible,
+                        textPlacement
                     );
                     console.log(`Finished image for page ${pageIndex}.`);
                 } catch (e) {
@@ -123,6 +146,7 @@ export async function POST(request: NextRequest) {
                     chapterNumber,
                     content,
                     illustrationBuffer,
+                    textPlacement
                 };
             }));
 
@@ -140,10 +164,16 @@ export async function POST(request: NextRequest) {
 
         // Upload PDF
         const pdfPath = `${bookId}/${Date.now()}-illustrated.pdf`
-        await supabase.storage.from('pdfs').upload(pdfPath, pdfBuffer, { contentType: 'application/pdf' })
+        const { error: uploadError } = await supabase.storage.from('pdfs').upload(pdfPath, pdfBuffer, { contentType: 'application/pdf' })
+        if (uploadError) {
+            throw new Error(`PDF upload failed: ${uploadError.message}`)
+        }
 
         // Create signed URL (7 days)
-        const { data: signedUrl } = await supabase.storage.from('pdfs').createSignedUrl(pdfPath, 7 * 24 * 3600)
+        const { data: signedUrl, error: signError } = await supabase.storage.from('pdfs').createSignedUrl(pdfPath, 7 * 24 * 3600)
+        if (signError || !signedUrl) {
+            throw new Error(`Failed to generate signed URL: ${signError?.message || 'unknown error'}`)
+        }
 
         // Update record
         await supabase

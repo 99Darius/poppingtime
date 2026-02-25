@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { sendContributorInviteEmail } from '@/lib/resend'
+import { getPrimaryAccountId } from '@/lib/auth/helper'
 
 interface Props {
     params: Promise<{ bookId: string }>
@@ -15,8 +16,9 @@ export async function POST(request: NextRequest, { params }: Props) {
     const { email } = await request.json()
 
     // Verify book ownership
+    const accountId = getPrimaryAccountId(user)
     const { data: book } = await supabase.from('books').select('title, owner_id').eq('id', bookId).single()
-    if (!book || book.owner_id !== user.id) {
+    if (!book || book.owner_id !== accountId) {
         return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
     }
 
@@ -33,7 +35,7 @@ export async function POST(request: NextRequest, { params }: Props) {
 
     // Send invite email regardless
     const inviterName = user.user_metadata?.display_name || user.email || 'Someone'
-    await sendContributorInviteEmail(email, inviterName, book.title, bookId).catch(console.error)
+    await sendContributorInviteEmail(email, inviterName, book.title, bookId, accountId).catch(console.error)
 
     return NextResponse.json({ success: true })
 }

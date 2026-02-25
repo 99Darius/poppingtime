@@ -1,12 +1,13 @@
-import { PDFDocument, rgb, StandardFonts, PDFPage } from 'pdf-lib'
-import QRCode from 'qrcode'
+import { PDFDocument, rgb, PDFPage, StandardFonts } from 'pdf-lib'
+import sharp from 'sharp'
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://poppingtime.com'
 
 interface Chapter {
     chapterNumber: number
-    content: string // rewrite or cleaned transcript
+    content: string
     illustrationBuffer?: Buffer
+    textPlacement?: 'top' | 'bottom'
 }
 
 export async function generateStoryPDF(
@@ -15,13 +16,14 @@ export async function generateStoryPDF(
     authorName: string
 ): Promise<Buffer> {
     const doc = await PDFDocument.create()
-    const fontRegular = await doc.embedFont(StandardFonts.TimesRoman)
-    const fontBold = await doc.embedFont(StandardFonts.TimesRomanBold)
+
+    // Use built-in Helvetica (Sans-Serif) to guarantee no file-loading crashes
+    const fontRegular = await doc.embedFont(StandardFonts.Helvetica)
+    const fontBold = await doc.embedFont(StandardFonts.HelveticaBold)
 
     // 8.5 x 8.5 inches at 72 dpi
     const PAGE_SIZE = 612
     const MARGIN = 40
-    const TEXT_SAFE_ZONE_HEIGHT = 180 // Bottom area reserved for text
     const CONTENT_W = PAGE_SIZE - MARGIN * 2
 
     // Helper: wrap text into lines
@@ -57,174 +59,201 @@ export async function generateStoryPDF(
     const cover = doc.addPage([PAGE_SIZE, PAGE_SIZE])
 
     // Background cover color
-    cover.drawRectangle({ x: 0, y: 0, width: PAGE_SIZE, height: PAGE_SIZE, color: rgb(0.15, 0.1, 0.3) })
+    cover.drawRectangle({ x: 0, y: 0, width: PAGE_SIZE, height: PAGE_SIZE, color: rgb(0.15, 0.1, 0.25) })
 
-    // If we have an illustration from chapter 1, we can optionally use it as cover bg
+    // Optional illustration from chapter 1 as cover bg
     if (chapters.length > 0 && chapters[0].illustrationBuffer) {
         try {
-            const buf = chapters[0].illustrationBuffer
-            const isPng = buf[0] === 0x89 && buf[1] === 0x50
-            const coverImg = isPng ? await doc.embedPng(buf) : await doc.embedJpg(buf)
-            cover.drawImage(coverImg, { x: 0, y: 0, width: PAGE_SIZE, height: PAGE_SIZE, opacity: 0.6 })
-        } catch { } // fallback to solid if it fails
+            const compressedCover = await sharp(chapters[0].illustrationBuffer)
+                .resize(800, 800, { fit: 'cover', withoutEnlargement: true })
+                .jpeg({ quality: 80 })
+                .toBuffer()
+            const coverImg = await doc.embedJpg(compressedCover)
+            cover.drawImage(coverImg, { x: 0, y: 0, width: PAGE_SIZE, height: PAGE_SIZE, opacity: 0.8 })
+        } catch { }
     }
 
-    // Centered Title Box
-    const titleLines = wrapText(bookTitle.toUpperCase(), CONTENT_W - 80, fontBold, 42)
-    const titleBoxH = titleLines.length * 50 + 80
+    // Title — compact rounded rectangle at the BOTTOM of the cover (avoids blocking faces)
+    const titleLines = wrapText(bookTitle.toUpperCase(), CONTENT_W - 60, fontBold, 36)
+    const titleLineHeight = 44
+    const titlePadding = 24
+    const titleBlockH = titleLines.length * titleLineHeight + titlePadding * 2 + 40 // +40 for author
+    const titleBlockY = 20 // Bottom of cover
+    const titleBlockW = Math.min(
+        CONTENT_W,
+        Math.max(...titleLines.map(l => fontBold.widthOfTextAtSize(l, 36))) + titlePadding * 2 + 20
+    )
+    const titleBlockX = (PAGE_SIZE - titleBlockW) / 2
 
-    // Draw a semi-transparent box behind the title for readability
+    // Rounded rectangle backdrop
     cover.drawRectangle({
-        x: MARGIN,
-        y: (PAGE_SIZE - titleBoxH) / 2,
-        width: PAGE_SIZE - MARGIN * 2,
-        height: titleBoxH,
-        color: rgb(0, 0, 0),
-        opacity: 0.7
+        x: titleBlockX,
+        y: titleBlockY,
+        width: titleBlockW,
+        height: titleBlockH,
+        color: rgb(1, 1, 1),
+        opacity: 0.88,
+        borderColor: rgb(0.85, 0.85, 0.85),
+        borderWidth: 0,
     })
 
-    let titleY = (PAGE_SIZE + titleBoxH) / 2 - 60
+    let titleY = titleBlockY + titleBlockH - titlePadding - 10
     for (const line of titleLines) {
-        const lineW = fontBold.widthOfTextAtSize(line, 42)
+        const lineW = fontBold.widthOfTextAtSize(line, 36)
         cover.drawText(line, {
             x: (PAGE_SIZE - lineW) / 2,
             y: titleY,
-            size: 42,
+            size: 36,
             font: fontBold,
-            color: rgb(1, 0.95, 0.8), // Warm white
+            color: rgb(0.1, 0.1, 0.2),
         })
-        titleY -= 50
+        titleY -= titleLineHeight
     }
 
-    // Author
+    // Author Name directly under title
     const authorText = `by ${authorName}`
-    const authorW = fontRegular.widthOfTextAtSize(authorText, 22)
+    const authorW = fontRegular.widthOfTextAtSize(authorText, 20)
     cover.drawText(authorText, {
         x: (PAGE_SIZE - authorW) / 2,
-        y: (PAGE_SIZE - titleBoxH) / 2 + 25,
-        size: 22,
+        y: titleBlockY + titlePadding,
+        size: 20,
         font: fontRegular,
-        color: rgb(1, 1, 1),
+        color: rgb(0.35, 0.35, 0.35),
     })
-
-    // QR code at bottom center
-    try {
-        const qrDataUrl = await QRCode.toDataURL(SITE_URL, { width: 50, margin: 1, color: { dark: '#000000', light: '#ffffff' } })
-        const qrBase64 = qrDataUrl.split(',')[1]
-        const qrImage = await doc.embedPng(Buffer.from(qrBase64, 'base64'))
-        cover.drawImage(qrImage, { x: PAGE_SIZE / 2 - 25, y: 30, width: 50, height: 50 })
-    } catch { }
 
     // --- Chapter Pages ---
     let lastChapterNumber = -1
+    const BODY_FONT_SIZE = 17
+    const BODY_LINE_HEIGHT = 24
+    const TEXT_PADDING_X = 20
+    const TEXT_PADDING_Y = 16
+    const TEXT_MAX_W = CONTENT_W * 0.72 // Text block is max ~72% of page width for variation
 
     for (const chapter of chapters) {
         let page = doc.addPage([PAGE_SIZE, PAGE_SIZE])
 
-        // 1. Draw Full Page Illustration Background
+        // 1. Draw Full Page Illustration
         if (chapter.illustrationBuffer) {
             try {
-                const isPng = chapter.illustrationBuffer[0] === 0x89 && chapter.illustrationBuffer[1] === 0x50
-                const img = isPng ? await doc.embedPng(chapter.illustrationBuffer) : await doc.embedJpg(chapter.illustrationBuffer)
-                // Stretch to fill the square (DALL-E 3 generates 1024x1024 so it's already square)
+                const compressedImage = await sharp(chapter.illustrationBuffer)
+                    .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+                    .jpeg({ quality: 80 })
+                    .toBuffer()
+
+                const img = await doc.embedJpg(compressedImage)
                 page.drawImage(img, { x: 0, y: 0, width: PAGE_SIZE, height: PAGE_SIZE })
             } catch (e) {
                 console.error('Failed to embed chapter image:', e)
-                // Fallback background if image fails
                 page.drawRectangle({ x: 0, y: 0, width: PAGE_SIZE, height: PAGE_SIZE, color: rgb(0.95, 0.93, 0.9) })
             }
         } else {
             page.drawRectangle({ x: 0, y: 0, width: PAGE_SIZE, height: PAGE_SIZE, color: rgb(0.95, 0.93, 0.9) })
         }
 
-        // 2. Draw Text Overlay Base
-        // We draw a solid or gradient strip at the bottom. Since pdf-lib doesn't have native gradients,
-        // we'll draw a solid dark overlay box with some opacity.
-        const bodyLines = wrapText(chapter.content, CONTENT_W, fontRegular, 16)
-
-        // Only allocate space for the header if this is the FIRST page of a new chapter
+        // 2. Text layout calculations — compact, right-inset
+        const bodyLines = wrapText(chapter.content, TEXT_MAX_W - TEXT_PADDING_X * 2, fontRegular, BODY_FONT_SIZE)
         const isNewChapter = chapter.chapterNumber !== lastChapterNumber
-        const headerHeight = isNewChapter ? 30 : 0
+        const chapterHeaderH = isNewChapter ? 28 : 0
+        const textContentH = bodyLines.length * BODY_LINE_HEIGHT + chapterHeaderH
+        const boxH = textContentH + TEXT_PADDING_Y * 2
 
-        const textHeightNeeded = bodyLines.length * 24 + 40 + headerHeight
-        const boxHeight = Math.max(TEXT_SAFE_ZONE_HEIGHT, textHeightNeeded)
+        // Compute actual width needed (based on longest line)
+        const maxLineW = Math.max(
+            ...bodyLines.map(l => fontRegular.widthOfTextAtSize(l, BODY_FONT_SIZE)),
+            isNewChapter ? fontBold.widthOfTextAtSize(`CHAPTER ${chapter.chapterNumber}`, 13) : 0
+        )
+        const boxW = Math.min(TEXT_MAX_W, maxLineW + TEXT_PADDING_X * 2 + 12)
 
+        const isTop = chapter.textPlacement === 'top'
+
+        // Position: inset from the right edge, at top or bottom
+        const boxX = PAGE_SIZE - boxW - 24
+        const boxY = isTop ? PAGE_SIZE - boxH - 16 : 16
+
+        // 3. Draw compact rounded-rectangle backdrop (semi-transparent white)
+        // pdf-lib doesn't have borderRadius so we draw a simple rect with slight appearance tricks
         page.drawRectangle({
-            x: 0,
-            y: 0,
-            width: PAGE_SIZE,
-            height: boxHeight,
-            color: rgb(0, 0, 0),
-            opacity: 0.65 // Dark enough for white text to be readable
+            x: boxX,
+            y: boxY,
+            width: boxW,
+            height: boxH,
+            color: rgb(1, 1, 1),
+            opacity: 0.88,
         })
 
-        // 3. Draw Text
-        // Chapter header (only on first page of new chapter)
-        let curY = boxHeight - 40
+        // 4. Draw Text Elements
+        let curY = boxY + boxH - TEXT_PADDING_Y - 4
 
         if (isNewChapter) {
-            const chapterLabel = `Chapter ${chapter.chapterNumber}`
-            page.drawText(chapterLabel.toUpperCase(), {
-                x: MARGIN,
+            const chapterLabel = `CHAPTER ${chapter.chapterNumber}`
+            page.drawText(chapterLabel, {
+                x: boxX + TEXT_PADDING_X,
                 y: curY,
-                size: 14,
+                size: 13,
                 font: fontBold,
-                color: rgb(1, 0.85, 0.4), // Golden yellow
+                color: rgb(0.3, 0.5, 0.8),
             })
-            curY -= 30
+            curY -= 26
             lastChapterNumber = chapter.chapterNumber
         }
 
-        // Body text
         for (const line of bodyLines) {
-            // If body is extremely long, we might need a continuation page, but typically 
-            // children's books have minimal text per page. AI rewrite keeps it short.
             if (curY < MARGIN) {
-                // VERY long text edge case - start new page
-                addFooter(page, bookTitle, fontRegular, PAGE_SIZE, 20)
                 page = doc.addPage([PAGE_SIZE, PAGE_SIZE])
-                page.drawRectangle({ x: 0, y: 0, width: PAGE_SIZE, height: PAGE_SIZE, color: rgb(0.1, 0.1, 0.1) })
+                page.drawRectangle({ x: 0, y: 0, width: PAGE_SIZE, height: PAGE_SIZE, color: rgb(1, 1, 1) })
                 curY = PAGE_SIZE - MARGIN - 40
             }
 
             page.drawText(line, {
-                x: MARGIN,
+                x: boxX + TEXT_PADDING_X,
                 y: curY,
-                size: 16,
+                size: BODY_FONT_SIZE,
                 font: fontRegular,
-                color: rgb(1, 1, 1), // White text
-                lineHeight: 24,
+                color: rgb(0.12, 0.12, 0.12),
+                lineHeight: BODY_LINE_HEIGHT,
             })
-            curY -= 24
+            curY -= BODY_LINE_HEIGHT
         }
-
-        addFooter(page, bookTitle, fontRegular, PAGE_SIZE, 20)
     }
 
-    // Add final author sign-off to the very last page
-    const lastPage = doc.getPage(doc.getPageCount() - 1)
-    const finalAuthorText = `Written by ${authorName}`
-    const finalAuthorW = fontRegular.widthOfTextAtSize(finalAuthorText, 14)
-    lastPage.drawText(finalAuthorText, {
-        x: PAGE_SIZE - MARGIN - finalAuthorW,
-        y: 20,
+    // --- Back Cover Page ---
+    const backCover = doc.addPage([PAGE_SIZE, PAGE_SIZE])
+    backCover.drawRectangle({ x: 0, y: 0, width: PAGE_SIZE, height: PAGE_SIZE, color: rgb(0.12, 0.12, 0.15) })
+
+    const backTitleLines = wrapText(bookTitle, CONTENT_W, fontBold, 24)
+    let backY = PAGE_SIZE / 2 + 60
+    for (const text of backTitleLines) {
+        const blw = fontBold.widthOfTextAtSize(text, 24)
+        backCover.drawText(text, {
+            x: (PAGE_SIZE - blw) / 2,
+            y: backY,
+            size: 24,
+            font: fontBold,
+            color: rgb(1, 1, 1)
+        })
+        backY -= 35
+    }
+
+    const backAuthor = `Written by ${authorName}`
+    const baw = fontRegular.widthOfTextAtSize(backAuthor, 16)
+    backCover.drawText(backAuthor, {
+        x: (PAGE_SIZE - baw) / 2,
+        y: backY,
+        size: 16,
+        font: fontRegular,
+        color: rgb(0.8, 0.8, 0.8)
+    })
+
+    const creditText = "Created magically on poppingtime.com"
+    const cw = fontRegular.widthOfTextAtSize(creditText, 14)
+    backCover.drawText(creditText, {
+        x: (PAGE_SIZE - cw) / 2,
+        y: 60,
         size: 14,
         font: fontRegular,
-        color: rgb(1, 1, 1),
+        color: rgb(0.5, 0.5, 0.6)
     })
 
     const bytes = await doc.save()
     return Buffer.from(bytes)
-}
-
-function addFooter(page: PDFPage, bookTitle: string, font: typeof StandardFonts.TimesRoman | any, pageW: number, margin: number) {
-    const siteText = `poppingtime.com  ·  ${bookTitle}`
-    const footerW = font.widthOfTextAtSize(siteText, 10)
-    page.drawText(siteText, {
-        x: (pageW - footerW) / 2,
-        y: margin,
-        size: 10,
-        font,
-        color: rgb(0.8, 0.8, 0.8),
-    })
 }

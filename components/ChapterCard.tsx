@@ -15,9 +15,18 @@ export default function ChapterCard({ chapter }: ChapterCardProps) {
     const [rewriting, setRewriting] = useState(false)
     const [audioUrl, setAudioUrl] = useState<string | null>(null)
     const [status, setStatus] = useState(chapter.transcript_status)
+
+    // Manual editing state
+    const transcript = chapter.transcript_cleaned || chapter.transcript_original || ''
+    const [isEditing, setIsEditing] = useState(false)
+    const [editText, setEditText] = useState(transcript)
+    const [isSaving, setIsSaving] = useState(false)
+
     const router = useRouter()
 
-    const transcript = chapter.transcript_cleaned || chapter.transcript_original
+    useEffect(() => {
+        setEditText(chapter.transcript_cleaned || chapter.transcript_original || '')
+    }, [chapter])
 
     // Polling if processing
     useEffect(() => {
@@ -73,6 +82,24 @@ export default function ChapterCard({ chapter }: ChapterCardProps) {
             alert('Cleanup failed — please try again.')
         } finally {
             setRewriting(false)
+        }
+    }
+
+    async function handleSaveEdit() {
+        setIsSaving(true)
+        try {
+            const res = await fetch(`/api/chapters/${chapter.id}/edit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: editText })
+            })
+            if (!res.ok) throw new Error('Save failed')
+            setIsEditing(false)
+            router.refresh()
+        } catch {
+            alert('Failed to save changes')
+        } finally {
+            setIsSaving(false)
         }
     }
 
@@ -155,30 +182,66 @@ export default function ChapterCard({ chapter }: ChapterCardProps) {
             {/* Transcript */}
             {status === 'ready' && transcript && (
                 <div style={{ marginBottom: 12 }}>
-                    <p className="serif" style={{
-                        fontSize: 15,
-                        lineHeight: 1.8,
-                        color: 'var(--text-primary)',
-                        whiteSpace: 'pre-wrap',
-                    }}>
-                        {showRewrite && rewriteText ? rewriteText : transcript}
-                    </p>
+                    {isEditing ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
+                            <textarea
+                                value={editText}
+                                onChange={e => setEditText(e.target.value)}
+                                className="serif"
+                                style={{
+                                    width: '100%',
+                                    minHeight: 160,
+                                    padding: '16px',
+                                    borderRadius: 8,
+                                    border: '1px solid var(--border)',
+                                    fontSize: 15,
+                                    lineHeight: 1.8,
+                                    resize: 'vertical',
+                                    outline: 'none',
+                                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)'
+                                }}
+                            />
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                                <button onClick={() => { setIsEditing(false); setEditText(transcript) }} className="btn-ghost" style={{ padding: '8px 16px', fontSize: 13 }}>Cancel</button>
+                                <button onClick={handleSaveEdit} className="btn-primary" disabled={isSaving} style={{ padding: '8px 16px', fontSize: 13, minHeight: 'unset' }}>
+                                    {isSaving ? 'Saving...' : 'Save Changes'}
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <p className="serif" style={{
+                            fontSize: 15,
+                            lineHeight: 1.8,
+                            color: 'var(--text-primary)',
+                            whiteSpace: 'pre-wrap',
+                        }}>
+                            {showRewrite && rewriteText ? rewriteText : transcript}
+                        </p>
+                    )}
                 </div>
             )}
 
-            {/* Rewrite toggle */}
-            {chapter.transcript_status === 'ready' && (
+            {/* Rewrite & Edit toggles */}
+            {chapter.transcript_status === 'ready' && !isEditing && (
                 <div style={{
                     display: 'flex',
-                    gap: 8,
+                    gap: 12,
                     paddingTop: 12,
                     borderTop: '1px solid var(--border)',
+                    alignItems: 'center',
                 }}>
+                    <button
+                        onClick={() => setIsEditing(true)}
+                        className="btn-ghost"
+                        style={{ fontSize: 13, color: 'var(--text-muted)', padding: '6px 12px' }}
+                    >
+                        ✎ Edit Text
+                    </button>
                     <button
                         onClick={handleRewrite}
                         className="btn-ghost"
                         disabled={rewriting}
-                        style={{ fontSize: 13 }}
+                        style={{ fontSize: 13, padding: '6px 12px' }}
                     >
                         {rewriting ? (
                             <><span className="spinner" style={{ width: 14, height: 14 }} /> Cleaning up...</>

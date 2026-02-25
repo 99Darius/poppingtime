@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
@@ -10,6 +10,7 @@ const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!
 
 export default function IllustratePage() {
     const params = useParams()
+    const router = useRouter()
     const bookId = params.bookId as string
     const [clientSecret, setClientSecret] = useState<string | null>(null)
     const [status, setStatus] = useState<'idle' | 'loading' | 'paying' | 'error'>('idle')
@@ -30,9 +31,16 @@ export default function IllustratePage() {
 
                 if (childName) defaultStr += ` & ${childName}`
 
-                const { data: contribs } = await supabase.from('book_contributors').select('user_id').eq('book_id', bookId)
-                if (contribs && contribs.length > 0) {
-                    defaultStr += ` (and ${contribs.length} co-author${contribs.length > 1 ? 's' : ''})`
+                const { data: bookOwner } = await supabase.from('books').select('owner_id').eq('id', bookId).single()
+                if (bookOwner) {
+                    const { count } = await supabase
+                        .from('user_profiles')
+                        .select('id', { count: 'exact', head: true })
+                        .eq('primary_account_id', bookOwner.owner_id)
+
+                    if (count && count > 0) {
+                        defaultStr += ` (and ${count} co-author${count > 1 ? 's' : ''})`
+                    }
                 }
 
                 setAuthorString(defaultStr)
@@ -54,6 +62,9 @@ export default function IllustratePage() {
             if (res.ok) {
                 setShowToast(true)
                 setStatus('idle')
+                setTimeout(() => {
+                    router.push(`/books/${bookId}/generating`)
+                }, 1500)
             } else {
                 setStatus('error')
             }
@@ -139,9 +150,6 @@ export default function IllustratePage() {
                         <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                             This will be stamped on the cover and the final page of your book.
                         </p>
-                        <Link href="/settings" style={{ fontSize: 12, color: 'var(--purple-deep)', fontWeight: 500, textDecoration: 'none' }}>
-                            Edit Co-Authors →
-                        </Link>
                     </div>
                 </div>
             )}
@@ -194,10 +202,8 @@ export default function IllustratePage() {
             ) : clientSecret && status === 'paying' ? (
                 <Elements stripe={stripePromise} options={{ clientSecret }}>
                     <CheckoutForm
-                        onSuccess={(url) => {
-                            setShowToast(true)
-                            setStatus('idle')
-                            setClientSecret(null)
+                        onSuccess={() => {
+                            router.push(`/books/${bookId}/generating`)
                         }}
                     />
                 </Elements>
@@ -209,32 +215,18 @@ export default function IllustratePage() {
                     bottom: 24,
                     left: '50%',
                     transform: 'translateX(-50%)',
-                    background: 'var(--purple-deep)',
+                    background: '#10b981',
                     color: 'white',
-                    padding: '16px 20px',
+                    padding: '16px 24px',
                     borderRadius: 12,
-                    boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+                    boxShadow: '0 10px 25px rgba(16,185,129,0.3)',
                     zIndex: 1000,
-                    width: '90%',
-                    maxWidth: 400,
                     display: 'flex',
-                    flexDirection: 'column',
+                    alignItems: 'center',
                     gap: 12
                 }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                        <div>
-                            <h4 style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Processing Book 🎨</h4>
-                            <p style={{ fontSize: 13, lineHeight: 1.5, opacity: 0.9 }}>
-                                This might take a few minutes. We will email you and it will appear in your completed books section when it is ready.
-                            </p>
-                        </div>
-                        <button
-                            onClick={() => setShowToast(false)}
-                            style={{ background: 'none', border: 'none', color: 'white', opacity: 0.6, cursor: 'pointer', fontSize: 20 }}
-                        >
-                            ×
-                        </button>
-                    </div>
+                    <span style={{ fontSize: 24 }}>🎟️</span>
+                    <h4 style={{ fontWeight: 600, fontSize: 16, margin: 0 }}>1 PDF Credit Redeemed!</h4>
                 </div>
             )}
         </div>

@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation'
 function LoginContent() {
     const searchParams = useSearchParams()
     const next = searchParams.get('next')
+    const inviterId = searchParams.get('inviter_id')
     const [email, setEmail] = useState('')
     const [sent, setSent] = useState(false)
     const [loading, setLoading] = useState(false)
@@ -17,12 +18,18 @@ function LoginContent() {
         setError('')
 
         try {
+            const params = new URLSearchParams()
+            if (next) params.append('next', next)
+            if (inviterId) params.append('inviter_id', inviterId)
+
+            const queryString = params.toString() ? `?${params.toString()}` : ''
+
             const res = await fetch('/api/auth/magic-link', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     email,
-                    redirectTo: `${window.location.origin}/auth/callback${next ? `?next=${encodeURIComponent(next)}` : ''}`,
+                    redirectTo: `${window.location.origin}/auth/callback${queryString}`,
                 }),
             })
 

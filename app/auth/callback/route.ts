@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
+import { createServiceClient } from '@/lib/supabase/server'
 
 export async function GET(request: NextRequest) {
     const { searchParams, origin } = new URL(request.url)
@@ -7,6 +8,7 @@ export async function GET(request: NextRequest) {
     const token_hash = searchParams.get('token_hash')
     const type = searchParams.get('type') as 'magiclink' | 'email' | null
     const searchNext = searchParams.get('next')
+    const inviter_id = searchParams.get('inviter_id')
     const next = (searchNext === null || searchNext === '/') ? '/dashboard' : searchNext
 
     console.log('[auth/callback] params:', { code: !!code, token_hash: !!token_hash, type, next })
@@ -46,10 +48,23 @@ export async function GET(request: NextRequest) {
     }
 
     if (verified) {
-        // Send welcome email for new users
+        // Send welcome email for new users and set primary_account_id
         try {
             const { data: { user } } = await supabase.auth.getUser()
             if (user) {
+                // Link account if invited and not already linked
+                if (inviter_id && !user.user_metadata?.primary_account_id) {
+                    const serviceClient = await createServiceClient()
+                    await serviceClient.auth.admin.updateUserById(user.id, {
+                        user_metadata: { ...user.user_metadata, primary_account_id: inviter_id }
+                    })
+                    // Sync up to profile
+                    await serviceClient
+                        .from('user_profiles')
+                        .update({ primary_account_id: inviter_id })
+                        .eq('id', user.id)
+                }
+
                 const { data: profile } = await supabase
                     .from('user_profiles')
                     .select('total_recording_seconds')

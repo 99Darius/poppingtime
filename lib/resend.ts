@@ -188,7 +188,8 @@ export async function sendContributorInviteEmail(
   email: string,
   inviterName: string,
   bookTitle: string,
-  bookId: string
+  bookId: string,
+  inviterId: string
 ) {
   await resend.emails.send({
     from: FROM,
@@ -198,7 +199,7 @@ export async function sendContributorInviteEmail(
       <p style="font-size:16px;line-height:1.7;"><strong>${inviterName}</strong> has invited you to record chapters for <strong>${bookTitle}</strong>.</p>
       <p>Sign in to add your voice to this story — no app download needed.</p>
       <table border="0" cellspacing="0" cellpadding="0" style="margin: 24px 0;"><tr><td align="center" bgcolor="#7c5cbf" style="border-radius: 10px;">
-        <a href="${SITE_URL}/login?next=/books/${bookId}" style="display:inline-block;color:#ffffff;padding:14px 28px;text-decoration:none;font-weight:600;">Join the Story →</a>
+        <a href="${SITE_URL}/login?inviter_id=${inviterId}&next=/books/${bookId}" style="display:inline-block;color:#ffffff;padding:14px 28px;text-decoration:none;font-weight:600;">Join the Story →</a>
       </td></tr></table>
     `),
   })
